@@ -1,0 +1,75 @@
+CREATE TABLE IF NOT EXISTS familias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    codigo_familia TEXT NOT NULL UNIQUE,  -- 8 dígitos de Sage
+    nombre TEXT NOT NULL,
+    email TEXT,
+    telefono TEXT,
+    dni TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS alumnos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    familia_id INTEGER NOT NULL REFERENCES familias(id),
+    nombre TEXT NOT NULL,
+    curso TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS email_threads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    family_code TEXT NOT NULL,
+    email_account TEXT NOT NULL CHECK(email_account IN ('gmail', 'outlook')),
+    last_message_id TEXT NOT NULL,  -- Message-ID del último email para responder en hilo
+    subject TEXT,
+    last_date TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(family_code, email_account)
+);
+
+CREATE TABLE IF NOT EXISTS casos_deuda (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    family_code TEXT NOT NULL,
+    importe REAL NOT NULL,
+    fecha_vencimiento DATE,
+    estado TEXT NOT NULL DEFAULT 'pendiente'
+        CHECK(estado IN ('pendiente', 'notificado', 'escalado', 'cobrado', 'incobrable')),
+    nivel_severidad INTEGER NOT NULL DEFAULT 1
+        CHECK(nivel_severidad BETWEEN 1 AND 4),
+    fecha_ultimo_contacto TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS system_prompts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    categoria TEXT NOT NULL
+        CHECK(categoria IN ('comunicacion', 'clasificacion', 'analisis')),
+    contenido TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    activo BOOLEAN NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS acciones_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    workflow TEXT,
+    family_code TEXT,
+    accion TEXT NOT NULL,
+    detalle TEXT,
+    usuario TEXT NOT NULL DEFAULT 'sistema'
+        CHECK(usuario IN ('sistema', 'ricardo', 'manolo'))
+);
+
+CREATE TABLE IF NOT EXISTS documentos_banco (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha DATE,
+    cuenta TEXT,
+    referencia_bancaria TEXT,
+    importe REAL,
+    tipo TEXT NOT NULL CHECK(tipo IN ('justificante', 'norma43')),
+    ruta_archivo TEXT,
+    procesado BOOLEAN NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
