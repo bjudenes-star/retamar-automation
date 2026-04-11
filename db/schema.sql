@@ -62,6 +62,22 @@ CREATE TABLE IF NOT EXISTS acciones_log (
         CHECK(usuario IN ('sistema', 'ricardo', 'manolo'))
 );
 
+CREATE TABLE IF NOT EXISTS facturas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero_factura TEXT NOT NULL UNIQUE,
+    family_code TEXT NOT NULL,
+    fecha DATE,
+    concepto TEXT,
+    base_imponible REAL,
+    iva REAL,
+    total REAL NOT NULL,
+    fecha_vencimiento DATE,
+    estado TEXT NOT NULL DEFAULT 'pendiente',
+    hash_contenido TEXT UNIQUE,  -- SHA256 para detectar duplicados
+    origen TEXT,  -- csv, sepa, excel
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS documentos_banco (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fecha DATE,
