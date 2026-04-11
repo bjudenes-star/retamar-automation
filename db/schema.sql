@@ -40,14 +40,27 @@ CREATE TABLE IF NOT EXISTS casos_deuda (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS system_prompts (
+CREATE TABLE IF NOT EXISTS plantillas_email (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT NOT NULL,
+    nombre TEXT NOT NULL UNIQUE,
+    asunto TEXT NOT NULL,  -- admite variables: {APELLIDO}, {CONCEPTO}, etc.
+    cuerpo TEXT NOT NULL,  -- admite variables: {APELLIDO}, {IMPORTE}, {FECHA_VENCIMIENTO}, {CONCEPTO}, {PLAZO_DIAS}, {NOMBRE_HIJO}, {CURSO}
     categoria TEXT NOT NULL
-        CHECK(categoria IN ('comunicacion', 'clasificacion', 'analisis')),
-    contenido TEXT NOT NULL,
+        CHECK(categoria IN ('primera_notificacion', 'seguimiento', 'escalado', 'peticion', 'informativo')),
+    activa BOOLEAN NOT NULL DEFAULT 1,
     version INTEGER NOT NULL DEFAULT 1,
-    activo BOOLEAN NOT NULL DEFAULT 1,
+    fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS reglas_decision (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL UNIQUE,
+    condicion_json TEXT NOT NULL,  -- JSON: {"num_devoluciones": 1, "importe_max": 500, "tiene_beca": false}
+    plantilla_id INTEGER NOT NULL REFERENCES plantillas_email(id),
+    accion TEXT NOT NULL
+        CHECK(accion IN ('enviar_auto', 'marcar_revision_humana', 'escalar')),
+    prioridad INTEGER NOT NULL DEFAULT 0,  -- mayor = se evalúa primero
+    activa BOOLEAN NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
