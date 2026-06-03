@@ -46,10 +46,12 @@ familias se sube a internet ni sale del equipo. La página es estática: sólo c
 > La línea de *“importe total pendiente”* (saldo de Sage) queda fuera de esta versión; el hueco
 > está preparado en el código para integrarla en el futuro.
 
-## Paso manual (una sola vez)
+## Despliegue
 
-En GitHub: **Settings → Pages → Source = GitHub Actions**. A partir de ahí, cada `push` a `main`
-vuelve a desplegar automáticamente (workflow `.github/workflows/pages.yml`).
+Ya está activo: el repositorio es **público** y Pages usa **GitHub Actions** como origen, así que
+cada `push` a `main` vuelve a desplegar automáticamente (workflow `.github/workflows/pages.yml`).
+
+> Si alguna vez hubiera que reactivarlo a mano: **Settings → Pages → Source = GitHub Actions**.
 
 ## Estructura
 
