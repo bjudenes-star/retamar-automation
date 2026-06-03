@@ -4,3 +4,10 @@ __pycache__/
 *.pyc
 .env
 .venv/
+
+# Datos reales con información personal (RGPD) — NUNCA al repositorio.
+# En GitHub Pages sólo va código; los ficheros de las familias se quedan en local.
+samples/
+*.pdf
+*.xlsx
+*.docx

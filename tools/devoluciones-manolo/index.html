@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Devoluciones de recibos — Cartas a familias · Retamar</title>
+<style>
+  :root { --azul:#1f4e79; --gris:#505050; --verde:#1b7a3d; --rojo:#b00020; --ambr:#8a6d00; --bd:#d7dbe0; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:#1d2630;
+         margin:0; background:#f4f6f9; line-height:1.5; }
+  header { background:var(--azul); color:#fff; padding:18px 24px; }
+  header h1 { margin:0; font-size:1.25rem; }
+  header p { margin:4px 0 0; opacity:.85; font-size:.9rem; }
+  main { max-width:980px; margin:0 auto; padding:22px 18px 60px; }
+  .paso { background:#fff; border:1px solid var(--bd); border-radius:10px; padding:18px 20px; margin:16px 0;
+          box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  .paso h2 { font-size:1rem; margin:0 0 12px; display:flex; align-items:center; gap:8px; }
+  .num { background:var(--azul); color:#fff; width:24px; height:24px; border-radius:50%;
+         display:inline-flex; align-items:center; justify-content:center; font-size:.85rem; flex:none; }
+  button { font:inherit; background:var(--azul); color:#fff; border:0; border-radius:8px;
+           padding:10px 16px; cursor:pointer; }
+  button:hover { background:#163a5a; }
+  button.sec { background:#fff; color:var(--azul); border:1px solid var(--azul); }
+  button:disabled { background:#aeb6c0; cursor:not-allowed; }
+  .muted { color:#5b6672; font-size:.9rem; }
+  #drop { border:2px dashed #b9c2cc; border-radius:10px; padding:30px; text-align:center; color:#5b6672;
+          transition:.15s; cursor:pointer; }
+  #drop.hot { border-color:var(--azul); background:#eef4fb; color:var(--azul); }
+  #drop.off { opacity:.5; pointer-events:none; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; margin-top:8px; }
+  th,td { text-align:left; padding:7px 9px; border-bottom:1px solid #eceff3; }
+  th { background:#f7f9fb; font-weight:600; }
+  td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .badge { font-size:.72rem; padding:2px 7px; border-radius:20px; font-weight:600; }
+  .b-cod { background:#e4eefb; color:var(--azul); }
+  .b-nom { background:#eaf6ec; color:var(--verde); }
+  .alert { border-radius:8px; padding:11px 14px; margin:10px 0; font-size:.9rem; }
+  .alert.err { background:#fde8ea; color:var(--rojo); border:1px solid #f3c2c8; }
+  .alert.warn { background:#fcf6e3; color:var(--ambr); border:1px solid #eadfae; }
+  .alert.ok { background:#e9f6ee; color:var(--verde); border:1px solid #c2e6cf; }
+  .alert.info{ background:#eaf1fb; color:var(--azul); border:1px solid #c9dcf5; }
+  .revisar td { background:#fffdf6; }
+  .hidden { display:none; }
+  code { background:#eef1f5; padding:1px 5px; border-radius:4px; font-size:.85em; }
+  .pill { display:inline-block; background:#eef1f5; border:1px solid var(--bd); border-radius:20px;
+          padding:3px 12px; font-size:.85rem; }
+  .resumen { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+  .stat { background:#f7f9fb; border:1px solid var(--bd); border-radius:8px; padding:8px 14px; }
+  .stat b { font-size:1.3rem; display:block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Devoluciones de recibos · Cartas a familias</h1>
+  <p>Colegio Retamar — secretaría. Cruza el DETIR de CaixaBank con el padrón y genera las cartas en Word.</p>
+</header>
+<main>
+  <div id="compat" class="alert err hidden">
+    Esta herramienta necesita <b>Google Chrome</b> o <b>Microsoft Edge</b> en ordenador (usa el acceso a carpetas del navegador).
+    En otros navegadores no funcionará.
+  </div>
+
+  <div class="alert info">
+    🔒 Todo el proceso ocurre <b>en este ordenador</b>. Ningún dato de las familias sale del equipo ni se envía a internet.
+  </div>
+
+  <!-- PASO 1 -->
+  <section class="paso">
+    <h2><span class="num">1</span> Carpeta de trabajo</h2>
+    <p class="muted">La carpeta donde están el <b>padrón</b> (<code>.xlsx</code>) y la <b>plantilla</b> de la carta (<code>.docx</code>).
+       Las cartas generadas se guardarán ahí, en una subcarpeta <code>Cartas/</code>.</p>
+    <p><button id="btnCarpeta">Elegir carpeta…</button>
+       <button id="btnCambiar" class="sec hidden">Cambiar carpeta</button></p>
+    <div id="estadoCarpeta"></div>
+  </section>
+
+  <!-- PASO 2 -->
+  <section class="paso">
+    <h2><span class="num">2</span> Cargar el DETIR (PDF de devoluciones)</h2>
+    <div id="drop" class="off">Arrastra aquí el PDF del DETIR &nbsp;·&nbsp; o haz clic para elegirlo
+      <input id="filePdf" type="file" accept="application/pdf" class="hidden">
+    </div>
+    <div id="estadoPdf"></div>
+  </section>
+
+  <!-- PASO 3 -->
+  <section class="paso hidden" id="seccionResultados">
+    <h2><span class="num">3</span> Resultado del cruce</h2>
+    <div class="resumen" id="resumen"></div>
+    <div id="tablaCasan"></div>
+    <div id="tablaRevisar"></div>
+  </section>
+
+  <!-- PASO 4 -->
+  <section class="paso hidden" id="seccionGenerar">
+    <h2><span class="num">4</span> Generar las cartas</h2>
+    <p class="muted">Crea un único documento Word con una carta por familia (salto de página entre ellas),
+       listo para que lo revises y lo envíes.</p>
+    <p><button id="btnGenerar">Generar cartas</button></p>
+    <div id="estadoGenerar"></div>
+  </section>
+</main>
+
+<script src="vendor/pizzip.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script type="module">
+import * as pdfjsLib from './vendor/pdf.min.mjs';
+pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
+
+/* ============================================================
+   LÓGICA PURA — idéntica a la validada headless (parser + cruce)
+   ============================================================ */
+const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio',
+               'agosto','septiembre','octubre','noviembre','diciembre'];
+const mesEs = mm => MESES[mm - 1];
+
+function normNombre(s) {
+  return (s || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')   // quita tildes
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+const parseImporte = s => parseFloat(String(s).replace(/\./g, '').replace(',', '.'));
+function fmtImporte(n) {
+  const [ent0, dec] = n.toFixed(2).split('.');
+  const ent = ent0.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return dec === '00' ? ent : `${ent},${dec}`;
+}
+// Últimos 8 dígitos = código cliente "43XXXXXX"; prefijo cuenta de clientes = 430.
+function familiaDesdeRef(ref) {
+  if (/[A-Za-z]/.test(ref)) return null;            // referencias ESA... no llevan código
+  const cod = ref.replace(/\D/g, '').slice(-8);
+  if (!cod.startsWith('430')) return null;
+  return parseInt(cod.slice(3), 10);                // "09459" -> 9459 ; "90343" -> 90343
+}
+
+function parseDetir(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const header = {};
+  for (const l of lines) {
+    const fl = l.match(/Fecha de liquidaci[oó]n:\s*(\d{2})-(\d{2})-(\d{4})/i);
+    if (fl) header.fechaLiq = { d: fl[1], m: fl[2], y: fl[3] };
+  }
+  const RE = /^(\S+)\s+(.+?)\s+(ES\d{2}(?:\s?\d{4}){5})\s+([\d.]+,\d{2})\s+(.+?)\s+(\d{2})-(\d{2})-(\d{4})\s+(.+?)\s+([0-9a-fA-F]{32})$/;
+  const adeudos = [];
+  for (const l of lines) {
+    const m = l.match(RE);
+    if (!m) continue;
+    adeudos.push({
+      ref: m[1], titular: m[2].trim(), iban: m[3], importe: parseImporte(m[4]),
+      concepto: m[5].trim(), vto: `${m[6]}-${m[7]}-${m[8]}`, motivo: m[9].trim(),
+      hash: m[10], familia: familiaDesdeRef(m[1]),
+    });
+  }
+  const tot = text.match(/IMPORTE TOTAL:\s*([\d.]+)\s*E\s*POR\s*(\d+)\s*ADEUDOS/i);
+  header.totalDeclarado = tot ? parseFloat(tot[1]) : null;
+  header.nAdeudosDeclarado = tot ? parseInt(tot[2], 10) : null;
+  return { header, adeudos };
+}
+
+function buildPadron(rows) {
+  const porFamilia = new Map();
+  // El titular del DETIR es el PADRE o la MADRE (quien paga), no el alumno; por eso el
+  // fallback por nombre cruza contra NOMBRE_PADRE/NOMBRE_MADRE (mismo formato "Apellidos, Nombre").
+  const porNombre = new Map();
+  for (const r of rows) {
+    const fam = parseInt(r.FAMILIA, 10);
+    if (!Number.isFinite(fam)) continue;
+    if (!porFamilia.has(fam)) porFamilia.set(fam, {
+      numFam: fam, apellidos: (r.APELLIDOS || '').trim(), emails: [],
+    });
+    const f = porFamilia.get(fam);
+    for (const e of [r.EMAIL_PADRE, r.EMAIL_MADRE]) {
+      const em = (e || '').trim();
+      if (em && !f.emails.includes(em)) f.emails.push(em);
+    }
+    for (const titular of [r.NOMBRE_PADRE, r.NOMBRE_MADRE]) {
+      const key = normNombre(titular);
+      if (!key) continue;
+      if (!porNombre.has(key)) porNombre.set(key, new Set());
+      porNombre.get(key).add(fam);
+    }
+  }
+  return { porFamilia, porNombre };
+}
+
+function cruzar(detir, padron) {
+  const grupos = new Map();
+  for (const a of detir.adeudos) {
+    let familiaInfo = null, via = null, motivoRevisar = null;
+    if (a.familia != null) {
+      familiaInfo = padron.porFamilia.get(a.familia) || null;
+      if (familiaInfo) via = 'codigo';
+      else motivoRevisar = `Código ${a.familia} no está en el padrón`;
+    } else {
+      const key = normNombre(a.titular);
+      const cand = padron.porNombre.get(key);
+      if (cand && cand.size === 1) { familiaInfo = padron.porFamilia.get([...cand][0]); via = 'nombre'; }
+      else if (cand && cand.size > 1) motivoRevisar = `Titular "${a.titular}" ambiguo (${cand.size} familias)`;
+      else motivoRevisar = `Referencia sin código y titular "${a.titular}" no está en el padrón`;
+    }
+    const clave = familiaInfo ? `F${familiaInfo.numFam}` : `R${a.ref}`;
+    if (!grupos.has(clave)) grupos.set(clave, { adeudos: [], familiaInfo, via, motivoRevisar });
+    grupos.get(clave).adeudos.push(a);
+  }
+  const casan = [], revisar = [];
+  for (const g of grupos.values()) {
+    const total = g.adeudos.reduce((s, a) => s + a.importe, 0);
+    if (g.familiaInfo && g.familiaInfo.emails.length > 0) casan.push({ ...g, total });
+    else {
+      let motivo = g.motivoRevisar;
+      if (!motivo && g.familiaInfo && g.familiaInfo.emails.length === 0)
+        motivo = `Familia ${g.familiaInfo.numFam} (${g.familiaInfo.apellidos}) sin email en el padrón`;
+      revisar.push({ ...g, total, motivo });
+    }
+  }
+  casan.sort((a, b) => a.familiaInfo.numFam - b.familiaInfo.numFam);
+  return { casan, revisar };
+}
+
+/* ============================================================
+   MOTOR DE COMBINACIÓN DOCX — idéntico al validado headless
+   ============================================================ */
+const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+const mk = (doc, tag) => doc.createElementNS(W, tag);
+const LN = n => (n.localName || n.nodeName || '').replace(/^w:/, '');
+const isEl = n => n && n.nodeType === 1;
+
+function paragraphsIn(nodes) {
+  const out = [];
+  for (const n of nodes) {
+    if (isEl(n) && LN(n) === 'p') out.push(n);
+    if (isEl(n)) for (const p of n.getElementsByTagName('w:p')) out.push(p);
+  }
+  return out;
+}
+const childRuns = p => Array.from(p.childNodes).filter(n => isEl(n) && LN(n) === 'r');
+const fldCharType = r => { const f = r.getElementsByTagName('w:fldChar')[0]; return f ? f.getAttribute('w:fldCharType') : null; };
+const instrOf = r => { const t = r.getElementsByTagName('w:instrText')[0]; return t ? t.textContent : ''; };
+const runHasText = r => r.getElementsByTagName('w:t').length > 0;
+
+function setRunText(doc, run, text) {
+  for (const c of Array.from(run.childNodes)) if (LN(c) !== 'rPr') run.removeChild(c);
+  const t = mk(doc, 'w:t');
+  t.setAttribute('xml:space', 'preserve');
+  t.appendChild(doc.createTextNode(text));
+  run.appendChild(t);
+  return run;
+}
+function ensureRPr(doc, run) {
+  let rpr = Array.from(run.childNodes).find(c => LN(c) === 'rPr');
+  if (!rpr) { rpr = mk(doc, 'w:rPr'); run.insertBefore(rpr, run.firstChild); }
+  return rpr;
+}
+function resolverCampo(doc, nodes, nombre, valor) {
+  const re = new RegExp('MERGEFIELD\\s+' + nombre + '(?:\\b|\\\\)', 'i');
+  for (const p of paragraphsIn(nodes)) {
+    let runs = childRuns(p);
+    for (let i = 0; i < runs.length; i++) {
+      if (fldCharType(runs[i]) !== 'begin') continue;
+      let instr = '', sep = -1, end = -1;
+      for (let k = i; k < runs.length; k++) {
+        instr += instrOf(runs[k]);
+        const ft = fldCharType(runs[k]);
+        if (ft === 'separate') sep = k;
+        if (ft === 'end') { end = k; break; }
+      }
+      if (end < 0 || !re.test(instr)) continue;
+      let resRun = null;
+      for (let k = (sep >= 0 ? sep + 1 : i + 1); k < end; k++)
+        if (runHasText(runs[k])) { resRun = runs[k]; break; }
+      const tmpl = (resRun || runs[i]).cloneNode(true);
+      setRunText(doc, tmpl, valor);
+      p.insertBefore(tmpl, runs[i]);
+      for (let k = i; k <= end; k++) p.removeChild(runs[k]);
+      runs = childRuns(p); i = -1;
+    }
+  }
+}
+function setCellText(doc, tc, text, { bold } = {}) {
+  const p = tc.getElementsByTagName('w:p')[0];
+  const runs = childRuns(p);
+  const tmpl = (runs[0] || mk(doc, 'w:r')).cloneNode(true);
+  setRunText(doc, tmpl, text);
+  if (bold) {
+    const rpr = ensureRPr(doc, tmpl);
+    if (!Array.from(rpr.childNodes).some(c => LN(c) === 'b')) rpr.insertBefore(mk(doc, 'w:b'), rpr.firstChild);
+  }
+  for (const r of runs) p.removeChild(r);
+  p.appendChild(tmpl);
+}
+function boldRuns(doc, scope) {
+  for (const r of scope.getElementsByTagName('w:r')) {
+    if (!runHasText(r)) continue;
+    const rpr = ensureRPr(doc, r);
+    if (!Array.from(rpr.childNodes).some(c => LN(c) === 'b')) rpr.insertBefore(mk(doc, 'w:b'), rpr.firstChild);
+  }
+}
+function setPageBreakBefore(doc, nodes) {
+  const p = paragraphsIn(nodes)[0];
+  if (!p) return;
+  let ppr = Array.from(p.childNodes).find(c => LN(c) === 'pPr');
+  if (!ppr) { ppr = mk(doc, 'w:pPr'); p.insertBefore(ppr, p.firstChild); }
+  if (!Array.from(ppr.childNodes).some(c => LN(c) === 'pageBreakBefore'))
+    ppr.insertBefore(mk(doc, 'w:pageBreakBefore'), ppr.firstChild);
+}
+function aplicarCarta(doc, nodes, carta, pageBreak) {
+  if (pageBreak) setPageBreakBefore(doc, nodes);
+  for (const t of nodes.flatMap(n => isEl(n) ? Array.from(n.getElementsByTagName('w:t')) : [])) {
+    if (/ha sido devuelto el siguiente recibo/i.test(t.textContent) && carta.recibos.length > 1)
+      t.textContent = t.textContent.replace('ha sido devuelto el siguiente recibo', 'han sido devueltos los siguientes recibos');
+  }
+  resolverCampo(doc, nodes, 'Nomfam', carta.nomfam);
+  resolverCampo(doc, nodes, 'NumFam', String(carta.numfam));
+
+  const tbl = nodes.find(n => isEl(n) && LN(n) === 'tbl') ||
+              nodes.flatMap(n => isEl(n) ? Array.from(n.getElementsByTagName('w:tbl')) : [])[0];
+  const filas = Array.from(tbl.getElementsByTagName('w:tr'));
+  const plantillaFila = filas[1];
+  const celdasDe = tr => Array.from(tr.getElementsByTagName('w:tc'));
+
+  for (const rec of carta.recibos) {
+    const clon = plantillaFila.cloneNode(true);
+    const tc = celdasDe(clon);
+    setCellText(doc, tc[0], carta.fechaCorta);
+    resolverCampo(doc, [tc[1]], 'Concepto', rec.concepto);
+    resolverCampo(doc, [tc[2]], 'Marzo', rec.importeFmt);   // el " €" lo aporta la plantilla
+    plantillaFila.parentNode.insertBefore(clon, plantillaFila);
+  }
+  const filaTotal = plantillaFila.cloneNode(true);
+  const tct = celdasDe(filaTotal);
+  setCellText(doc, tct[0], '');
+  setCellText(doc, tct[1], 'TOTAL', { bold: true });
+  resolverCampo(doc, [tct[2]], 'Marzo', carta.totalFmt);
+  boldRuns(doc, tct[2]);
+  plantillaFila.parentNode.insertBefore(filaTotal, plantillaFila);
+  plantillaFila.parentNode.removeChild(plantillaFila);
+
+  // v1: se omite la frase del "importe total pendiente" (saldo de Sage).
+  // Hueco para el futuro: cuando se integre Sage, sustituir por el saldo real en vez de eliminar.
+  const quitar = new Set();
+  for (const p of paragraphsIn(nodes)) {
+    const txt = Array.from(p.getElementsByTagName('w:t')).map(t => t.textContent).join('');
+    if (/importe total pendiente a/i.test(txt)) { if (p.parentNode) p.parentNode.removeChild(p); else quitar.add(p); }
+  }
+  return nodes.filter(n => !quitar.has(n));
+}
+function combinarDocumentXml(xml, cartas) {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const body = doc.getElementsByTagName('w:body')[0];
+  const sectPr = Array.from(body.childNodes).find(n => isEl(n) && LN(n) === 'sectPr');
+  const plantilla = Array.from(body.childNodes)
+    .filter(n => !(isEl(n) && LN(n) === 'sectPr')).map(n => n.cloneNode(true));
+  while (body.firstChild) body.removeChild(body.firstChild);
+  cartas.forEach((carta, i) => {
+    const nodos = aplicarCarta(doc, plantilla.map(n => n.cloneNode(true)), carta, i > 0);
+    for (const n of nodos) body.appendChild(n);
+  });
+  if (sectPr) body.appendChild(sectPr);
+  return new XMLSerializer().serializeToString(doc);
+}
+
+/* ============================================================
+   PDF -> texto (mismo reensamblado por coordenada Y que headless)
+   ============================================================ */
+async function pdfToText(arrayBuffer) {
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+  let out = '';
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const tc = await (await pdf.getPage(p)).getTextContent();
+    const lines = new Map();
+    for (const it of tc.items) {
+      if (!it.str) continue;
+      const y = Math.round(it.transform[5]);
+      if (!lines.has(y)) lines.set(y, []);
+      lines.get(y).push({ x: it.transform[4], s: it.str });
+    }
+    for (const y of [...lines.keys()].sort((a, b) => b - a))
+      out += lines.get(y).sort((a, b) => a.x - b.x).map(o => o.s).join(' ').replace(/\s+/g, ' ').trim() + '\n';
+  }
+  return out;
+}
+
+/* ============================================================
+   PERSISTENCIA — IndexedDB para recordar la carpeta de trabajo
+   ============================================================ */
+const IDB = { db: null };
+function idbOpen() {
+  return IDB.db ? Promise.resolve(IDB.db) : new Promise((res, rej) => {
+    const r = indexedDB.open('devoluciones-manolo', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('kv');
+    r.onsuccess = () => res(IDB.db = r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+async function idbSet(k, v) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, k);
+    tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+  });
+}
+async function idbGet(k) {
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const r = db.transaction('kv', 'readonly').objectStore('kv').get(k);
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+}
+
+/* ============================================================
+   APP / UI
+   ============================================================ */
+const $ = s => document.querySelector(s);
+const estado = { dir: null, padron: null, plantillaXml: null, plantillaZip: null,
+                 nombrePlantilla: null, nombrePadron: null, detir: null, cruce: null };
+
+function alerta(sel, tipo, html) { $(sel).innerHTML = `<div class="alert ${tipo}">${html}</div>`; }
+function limpia(sel) { $(sel).innerHTML = ''; }
+
+// --- Compatibilidad ---
+if (!('showDirectoryPicker' in window)) {
+  $('#compat').classList.remove('hidden');
+  $('#btnCarpeta').disabled = true;
+}
+
+// --- Carpeta de trabajo ---
+async function permisoRW(handle) {
+  const opt = { mode: 'readwrite' };
+  if ((await handle.queryPermission(opt)) === 'granted') return true;
+  return (await handle.requestPermission(opt)) === 'granted';
+}
+
+async function cargarFicherosCarpeta() {
+  let xlsx = null, docx = null;
+  for await (const [name, h] of estado.dir.entries()) {
+    if (h.kind !== 'file' || name.startsWith('~$') || name.startsWith('.')) continue;
+    if (/\.xlsx$/i.test(name) && !xlsx) xlsx = h;
+    if (/\.docx$/i.test(name) && !docx) docx = h;
+  }
+  if (!xlsx) throw new Error('No encuentro el <b>padrón</b> (un fichero <code>.xlsx</code>) en la carpeta.');
+  if (!docx) throw new Error('No encuentro la <b>plantilla</b> de la carta (un fichero <code>.docx</code>) en la carpeta.');
+
+  const wb = XLSX.read(await (await xlsx.getFile()).arrayBuffer(), { type: 'array' });
+  const hoja = wb.Sheets['Hoja1'] || wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(hoja, { defval: '' });
+  if (!rows.length || !('FAMILIA' in rows[0]))
+    throw new Error(`El padrón <code>${xlsx.name}</code> no tiene la columna <code>FAMILIA</code> en la hoja <code>Hoja1</code>.`);
+  estado.padron = buildPadron(rows);
+  estado.nombrePadron = xlsx.name;
+
+  estado.plantillaZip = new PizZip(await (await docx.getFile()).arrayBuffer());
+  estado.plantillaXml = estado.plantillaZip.file('word/document.xml').asText();
+  estado.nombrePlantilla = docx.name;
+}
+
+async function usarCarpeta(handle, recordar) {
+  estado.dir = handle;
+  if (!(await permisoRW(handle))) { alerta('#estadoCarpeta', 'warn', 'Necesito permiso para leer y escribir en la carpeta.'); return; }
+  try {
+    await cargarFicherosCarpeta();
+  } catch (e) {
+    alerta('#estadoCarpeta', 'err', e.message);
+    estado.dir = null; return;
+  }
+  if (recordar) await idbSet('workdir', handle);
+  $('#btnCarpeta').classList.add('hidden');
+  $('#btnCambiar').classList.remove('hidden');
+  alerta('#estadoCarpeta', 'ok',
+    `Carpeta lista: <b>${handle.name}</b><br>` +
+    `Padrón: <code>${estado.nombrePadron}</code> · Plantilla: <code>${estado.nombrePlantilla}</code>`);
+  $('#drop').classList.remove('off');
+  if (estado.detir) procesarCruce();   // si ya había un DETIR cargado, recalcular
+}
+
+$('#btnCarpeta').onclick = $('#btnCambiar').onclick = async () => {
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    await usarCarpeta(handle, true);
+  } catch (e) { if (e.name !== 'AbortError') alerta('#estadoCarpeta', 'err', 'No se pudo abrir la carpeta: ' + e.message); }
+};
+
+// Recuperar carpeta recordada al cargar
+(async () => {
+  if (!('showDirectoryPicker' in window)) return;
+  const handle = await idbGet('workdir').catch(() => null);
+  if (!handle) return;
+  if ((await handle.queryPermission({ mode: 'readwrite' })) === 'granted') usarCarpeta(handle, false);
+  else {
+    $('#estadoCarpeta').innerHTML =
+      `<div class="alert info">Carpeta recordada: <b>${handle.name}</b>. ` +
+      `<button id="btnRecon" class="sec">Reconectar</button></div>`;
+    $('#btnRecon').onclick = () => usarCarpeta(handle, true);
+  }
+})();
+
+// --- Carga del DETIR (PDF) ---
+const drop = $('#drop'), filePdf = $('#filePdf');
+drop.onclick = () => filePdf.click();
+filePdf.onchange = () => filePdf.files[0] && leerPdf(filePdf.files[0]);
+['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('hot'); }));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('hot'); }));
+drop.addEventListener('drop', e => {
+  const f = [...e.dataTransfer.files].find(f => /\.pdf$/i.test(f.name));
+  if (f) leerPdf(f); else alerta('#estadoPdf', 'err', 'Arrastra un archivo PDF.');
+});
+
+async function leerPdf(file) {
+  alerta('#estadoPdf', 'info', `Leyendo <b>${file.name}</b>…`);
+  try {
+    const text = await pdfToText(await file.arrayBuffer());
+    const detir = parseDetir(text);
+    if (!detir.adeudos.length)
+      return alerta('#estadoPdf', 'err', 'Este PDF no parece un DETIR de CaixaBank (no encuentro adeudos). Revisa el archivo.');
+    estado.detir = detir;
+    const n = detir.adeudos.length, dec = detir.header.nAdeudosDeclarado;
+    let aviso = '';
+    if (dec && dec !== n) aviso = `<br><span class="alert warn" style="display:inline-block;margin-top:6px">⚠️ Leí ${n} adeudos pero el DETIR declara ${dec}. Revisa el resultado.</span>`;
+    alerta('#estadoPdf', 'ok', `DETIR cargado: <b>${n} adeudos</b> · fecha de liquidación <b>${fechaCortaDe(detir)}</b>.${aviso}`);
+    if (estado.padron) procesarCruce();
+    else alerta('#estadoPdf', 'warn', 'DETIR cargado. Elige primero la carpeta de trabajo (paso 1) para cruzarlo con el padrón.');
+  } catch (e) {
+    alerta('#estadoPdf', 'err', 'No pude leer el PDF: ' + e.message);
+  }
+}
+
+const fechaCortaDe = d => `${d.header.fechaLiq.d}/${d.header.fechaLiq.m}/${d.header.fechaLiq.y}`;
+
+// --- Cruce y render ---
+function procesarCruce() {
+  const cruce = cruzar(estado.detir, estado.padron);
+  estado.cruce = cruce;
+  const { casan, revisar } = cruce;
+  $('#seccionResultados').classList.remove('hidden');
+  $('#resumen').innerHTML =
+    `<div class="stat"><b>${casan.length}</b> familias con carta</div>` +
+    `<div class="stat"><b>${revisar.length}</b> a revisar a mano</div>` +
+    `<div class="stat"><b>${casan.reduce((s, c) => s + c.adeudos.length, 0)}</b> recibos casados</div>`;
+
+  $('#tablaCasan').innerHTML = casan.length ? `
+    <h3 style="font-size:.95rem;margin:14px 0 4px">✅ Familias que reciben carta</h3>
+    <table><thead><tr><th>Nº fam.</th><th>Apellidos</th><th>Vía</th><th class="num">Recibos</th>
+      <th class="num">Total</th><th>Destinatarios</th></tr></thead><tbody>${
+      casan.map(c => `<tr>
+        <td class="num">${c.familiaInfo.numFam}</td>
+        <td>${esc(c.familiaInfo.apellidos)}</td>
+        <td><span class="badge ${c.via === 'codigo' ? 'b-cod' : 'b-nom'}">${c.via === 'codigo' ? 'código' : 'nombre'}</span></td>
+        <td class="num">${c.adeudos.length}</td>
+        <td class="num">${fmtImporte(c.total)} €</td>
+        <td class="muted">${c.familiaInfo.emails.map(esc).join('<br>')}</td>
+      </tr>`).join('')}</tbody></table>` : '';
+
+  $('#tablaRevisar').innerHTML = revisar.length ? `
+    <h3 style="font-size:.95rem;margin:18px 0 4px">⚠️ A revisar (no se genera carta)</h3>
+    <table class="revisar"><thead><tr><th>Titular en el DETIR</th><th class="num">Importe</th><th>Motivo</th></tr></thead><tbody>${
+      revisar.map(r => `<tr>
+        <td>${esc(r.adeudos[0].titular)}</td>
+        <td class="num">${fmtImporte(r.total)} €</td>
+        <td>${esc(r.motivo)}</td>
+      </tr>`).join('')}</tbody></table>` : '';
+
+  $('#seccionGenerar').classList.toggle('hidden', casan.length === 0);
+  limpia('#estadoGenerar');
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// --- Generación del Word ---
+$('#btnGenerar').onclick = async () => {
+  const { casan } = estado.cruce;
+  if (!casan.length) return;
+  $('#btnGenerar').disabled = true;
+  alerta('#estadoGenerar', 'info', 'Generando las cartas…');
+  try {
+    const fl = estado.detir.header.fechaLiq;
+    const fechaCorta = `${fl.d}/${fl.m}/${fl.y}`;
+    const mes = mesEs(parseInt(fl.m, 10));
+    const cartas = casan.map(c => ({
+      nomfam: c.familiaInfo.apellidos,
+      numfam: c.familiaInfo.numFam,
+      fechaCorta,
+      recibos: c.adeudos.map(a => ({ concepto: `Devolución enseñanza ${mes}`, importeFmt: fmtImporte(a.importe) })),
+      totalFmt: fmtImporte(c.total),
+    }));
+
+    const outXml = combinarDocumentXml(estado.plantillaXml, cartas);
+    const zip = new PizZip(estado.plantillaZip.generate({ type: 'arraybuffer' }));  // copia limpia de la plantilla
+    zip.file('word/document.xml', outXml);
+    const blob = new Blob([zip.generate({ type: 'arraybuffer' })],
+      { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+
+    const nombre = await guardarSinSobrescribir(blob, `Cartas_devoluciones_${fl.y}${fl.m}${fl.d}`);
+    alerta('#estadoGenerar', 'ok',
+      `✅ Generadas <b>${cartas.length}</b> cartas.<br>Guardado en <code>${estado.dir.name}/Cartas/${nombre}</code><br>` +
+      `<span class="muted">Ábrelo en Word, revísalo y envíalo a las familias.</span>`);
+  } catch (e) {
+    alerta('#estadoGenerar', 'err', 'No se pudieron generar las cartas: ' + e.message);
+  } finally {
+    $('#btnGenerar').disabled = false;
+  }
+};
+
+async function guardarSinSobrescribir(blob, base) {
+  const carpeta = await estado.dir.getDirectoryHandle('Cartas', { create: true });
+  const existentes = new Set();
+  for await (const [name] of carpeta.entries()) existentes.add(name.toLowerCase());
+  let nombre = `${base}.docx`, n = 2;
+  while (existentes.has(nombre.toLowerCase())) nombre = `${base} (${n++}).docx`;
+  const fh = await carpeta.getFileHandle(nombre, { create: true });
+  const w = await fh.createWritable();
+  await w.write(blob);
+  await w.close();
+  return nombre;
+}
+</script>
+</body>
+</html>
