@@ -104,11 +104,14 @@
        con todas las cartas en un solo documento. Las familias y sus correos los tienes en el paso 3.</p>
     <p style="margin-top:8px">
       <button id="btnExcel">Generar Excel + Word (combinación)</button>
-      <button id="btnAbrir" class="sec">Abrir Word combinado</button>
+      <button id="btnAbrir" class="sec">Generar Word combinado</button>
+      <button id="btnRegistro" class="sec">Ver registro de envíos</button>
     </p>
     <p class="muted" style="margin:2px 0 0">El botón <b>Excel + Word</b> genera el origen de datos y el Word ya enlazado para combinar y enviar.
-       <b>Abrir Word combinado</b> abre directamente el documento con todas las cartas (para revisar o imprimir).</p>
+       <b>Word combinado</b> guarda en la carpeta el documento con todas las cartas (para revisar o imprimir).
+       Cada generación queda anotada en el <b>registro de envíos</b>.</p>
     <div id="estadoGenerar" style="margin-top:10px"></div>
+    <div id="tablaRegistro" style="margin-top:10px"></div>
 
     <div style="margin-top:18px;padding:12px 14px;border:1px dashed var(--bd);border-radius:8px;background:#fafbfc">
       <b>🧪 Probar la combinación</b>
@@ -675,6 +678,7 @@ $('#btnExcel').onclick = async () => {
         filas.push({ Nomfam: c.info.apellidos, NumFam: c.info.numFam, Concepto: `Devolución enseñanza ${mes}`, Marzo: Number(a.importe), Total: Number(a.importe), Email: email });
     }
     const { nombreXlsx, nombreDoc } = await generarParCombinacion(filas, `Combinacion_devoluciones_${fl.y}${fl.m}${fl.d}`);
+    await registrarEnvio('EMAIL', items.map(c => ({ numFam: c.info.numFam, apellidos: c.info.apellidos, importe: c.total, correos: emailsDe(c.info).trim() })));
     alerta('#estadoGenerar', 'ok',
       `✅ Generados en <code>${estado.dir.name}/Combinacion/</code> (${filas.length} fila(s), ${items.length} familias):<br>` +
       `• <code>${nombreXlsx}</code> — datos<br>• <code>${nombreDoc}</code> — Word ya enlazado<br>` +
@@ -705,6 +709,7 @@ $('#btnPrueba').onclick = async () => {
       return { Nomfam: info.apellidos, NumFam: info.numFam, Concepto: `Devolución enseñanza ${mes} (PRUEBA)`, Marzo: Number(imp), Total: Number(imp), Email: email };
     });
     const { nombreDoc } = await generarParCombinacion(filas, `PRUEBA_combinacion_${fl.y}${fl.m}${fl.d}`);
+    await registrarEnvio('PRUEBA', filas.map(f => ({ numFam: f.NumFam, apellidos: f.Nomfam, importe: f.Total, correos: f.Email })));
     alerta('#estadoGenerar', 'ok',
       `🧪 PRUEBA con <b>${filas.length}</b> correo(s) generada en <code>${estado.dir.name}/Combinacion/</code>:<br>• <code>${nombreDoc}</code><br>` +
       `<span class="muted">Ábrelo, combina y envía: te llegarán ${filas.length} correos a las direcciones de prueba. Si todo va bien, usa luego el botón de arriba para el envío real.</span>`);
@@ -738,32 +743,69 @@ function construirWordCombinado(items) {
     settings.asText().replace(/<w:mailMerge>[\s\S]*?<\/w:mailMerge>/, ''));
   return { blob: new Blob([zip.generate({ type: 'arraybuffer' })], { type: MIME_DOCX }), n: cartas.length };
 }
-// Descarga un blob (el navegador no puede lanzar Word; al abrir la descarga se abre en Word)
-function abrirBlob(blob, nombre) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = nombre;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
+// --- Registro de envíos (CSV persistente en la carpeta de trabajo) ---
+const CABECERA_REG = 'FechaHora;FechaDETIR;Tipo;NumFamilia;Apellidos;Importe;Correos';
+const dosDig = n => String(n).padStart(2, '0');
+function ahoraTexto() {
+  const d = new Date();
+  return `${dosDig(d.getDate())}/${dosDig(d.getMonth() + 1)}/${d.getFullYear()} ${dosDig(d.getHours())}:${dosDig(d.getMinutes())}`;
+}
+const celdaCsv = v => { const s = String(v ?? '').replace(/;/g, ' /'); return /[\n"]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+// regs: [{ numFam, apellidos, importe, correos }]
+async function registrarEnvio(tipo, regs) {
+  const fl = estado.detir.header.fechaLiq;
+  const fechaDetir = `${fl.d}/${fl.m}/${fl.y}`;
+  const stamp = ahoraTexto();
+  const fh = await estado.dir.getFileHandle('Registro_envios.csv', { create: true });
+  let texto = (await (await fh.getFile()).text()).trim();
+  if (!texto) texto = CABECERA_REG;
+  for (const r of regs)
+    texto += '\n' + [stamp, fechaDetir, tipo, r.numFam, r.apellidos, fmtImporte(r.importe), r.correos].map(celdaCsv).join(';');
+  const w = await fh.createWritable();
+  await w.write(texto + '\n');
+  await w.close();
 }
 
-// Abrir el Word combinado directamente (lo genera y lo descarga; al abrir la descarga se abre en Word)
+// Generar el Word combinado y guardarlo en la carpeta (sin descargar)
 $('#btnAbrir').onclick = async () => {
   const items = cartasParaGenerar();
   if (!items.length) return;
   $('#btnAbrir').disabled = true;
-  alerta('#estadoGenerar', 'info', 'Preparando el Word combinado…');
+  alerta('#estadoGenerar', 'info', 'Generando el Word combinado…');
   try {
     const fl = estado.detir.header.fechaLiq;
     const { blob, n } = construirWordCombinado(items);
-    abrirBlob(blob, `Cartas_devoluciones_${fl.y}${fl.m}${fl.d}.docx`);
+    const nombre = await guardarSinSobrescribir(blob, `Cartas_devoluciones_${fl.y}${fl.m}${fl.d}`);
+    await registrarEnvio('WORD', items.map(c => ({ numFam: c.info.numFam, apellidos: c.info.apellidos, importe: c.total, correos: emailsDe(c.info).trim() })));
     alerta('#estadoGenerar', 'ok',
-      `📄 Word combinado con <b>${n}</b> cartas descargado.<br>` +
-      `<span class="muted">Ábrelo desde la descarga del navegador (se abrirá en Word). El navegador no puede lanzar Word por sí solo.</span>`);
+      `✅ Word combinado con <b>${n}</b> cartas guardado en <code>${estado.dir.name}/Cartas/${nombre}</code>.<br>` +
+      `<span class="muted">Anotado en el registro de envíos.</span>`);
   } catch (e) {
-    alerta('#estadoGenerar', 'err', 'No se pudo abrir el Word: ' + e.message);
+    alerta('#estadoGenerar', 'err', 'No se pudo generar el Word: ' + e.message);
   } finally {
     $('#btnAbrir').disabled = false;
+  }
+};
+
+// Ver el registro de envíos (lee el CSV de la carpeta y lo muestra)
+$('#btnRegistro').onclick = async () => {
+  try {
+    const fh = await estado.dir.getFileHandle('Registro_envios.csv');
+    const lineas = (await (await fh.getFile()).text()).trim().split('\n');
+    const filas = lineas.slice(1).filter(Boolean).map(l => l.split(';'));
+    if (!filas.length) { $('#tablaRegistro').innerHTML = '<p class="muted">El registro está vacío.</p>'; return; }
+    // más recientes arriba
+    filas.reverse();
+    $('#tablaRegistro').innerHTML = `
+      <h3 style="font-size:.95rem;margin:6px 0 4px">📋 Registro de envíos (${filas.length})</h3>
+      <table><thead><tr><th>Fecha/hora</th><th>DETIR</th><th>Tipo</th><th class="num">Nº fam.</th><th>Apellidos</th><th class="num">Importe</th><th>Correos</th></tr></thead><tbody>${
+        filas.map(c => `<tr>
+          <td>${esc(c[0] || '')}</td><td>${esc(c[1] || '')}</td><td><span class="badge ${c[2] === 'PRUEBA' ? 'b-nom' : 'b-cod'}">${esc(c[2] || '')}</span></td>
+          <td class="num">${esc(c[3] || '')}</td><td>${esc(c[4] || '')}</td><td class="num">${esc(c[5] || '')}</td><td class="muted">${esc((c[6] || '').replace(/"/g, ''))}</td>
+        </tr>`).join('')}</tbody></table>
+      <p class="muted" style="margin:4px 0 0">Archivo: <code>${estado.dir.name}/Registro_envios.csv</code></p>`;
+  } catch (e) {
+    $('#tablaRegistro').innerHTML = '<p class="muted">Aún no hay registro: genera o envía algo primero.</p>';
   }
 };
 
