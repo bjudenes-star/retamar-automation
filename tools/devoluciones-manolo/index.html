@@ -669,6 +669,13 @@ function wordEnlazado(nombreExcel) {
   zip.file('word/settings.xml', s);
   const rels = zip.file('word/_rels/settings.xml.rels');
   if (rels) zip.file('word/_rels/settings.xml.rels', rels.asText().replace(/Target="[^"]*"/g, `Target="${nombreExcel}"`));
+  // Quita la frase del "importe total pendiente" (saldo de Sage que no tenemos), manteniendo los campos de combinación
+  const doc = new DOMParser().parseFromString(zip.file('word/document.xml').asText(), 'application/xml');
+  for (const p of Array.from(doc.getElementsByTagName('w:p'))) {
+    const txt = Array.from(p.getElementsByTagName('w:t')).map(t => t.textContent).join('');
+    if (/importe total pendiente a/i.test(txt) && p.parentNode) p.parentNode.removeChild(p);
+  }
+  zip.file('word/document.xml', new XMLSerializer().serializeToString(doc));
   return zip.generate({ type: 'arraybuffer' });
 }
 // Genera y guarda el par Excel + Word enlazado; devuelve los nombres
