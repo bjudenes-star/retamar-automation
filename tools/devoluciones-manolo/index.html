@@ -41,6 +41,9 @@
   .alert.ok { background:#e9f6ee; color:var(--verde); border:1px solid #c2e6cf; }
   .alert.info{ background:#eaf1fb; color:var(--azul); border:1px solid #c9dcf5; }
   .revisar td { background:#fffdf6; }
+  input.asig { font:inherit; padding:4px 7px; border:1px solid var(--bd); border-radius:6px; width:92px; }
+  .asig-fb { font-size:.85rem; margin-left:6px; }
+  tr.resuelto td { background:#e9f6ee; }
   .hidden { display:none; }
   code { background:#eef1f5; padding:1px 5px; border-radius:4px; font-size:.85em; }
   .pill { display:inline-block; background:#eef1f5; border:1px solid var(--bd); border-radius:20px;
@@ -534,10 +537,7 @@ function procesarCruce() {
   estado.cruce = cruce;
   const { casan, revisar } = cruce;
   $('#seccionResultados').classList.remove('hidden');
-  $('#resumen').innerHTML =
-    `<div class="stat"><b>${casan.length}</b> familias con carta</div>` +
-    `<div class="stat"><b>${revisar.length}</b> a revisar a mano</div>` +
-    `<div class="stat"><b>${casan.reduce((s, c) => s + c.adeudos.length, 0)}</b> recibos casados</div>`;
+  renderResumen();
 
   $('#tablaCasan').innerHTML = casan.length ? `
     <h3 style="font-size:.95rem;margin:14px 0 4px">✅ Familias que reciben carta</h3>
@@ -553,32 +553,77 @@ function procesarCruce() {
       </tr>`).join('')}</tbody></table>` : '';
 
   $('#tablaRevisar').innerHTML = revisar.length ? `
-    <h3 style="font-size:.95rem;margin:18px 0 4px">⚠️ A revisar (no se genera carta)</h3>
-    <table class="revisar"><thead><tr><th>Titular en el DETIR</th><th class="num">Importe</th><th>Motivo</th></tr></thead><tbody>${
-      revisar.map(r => `<tr>
+    <h3 style="font-size:.95rem;margin:18px 0 4px">⚠️ A revisar</h3>
+    <p class="muted" style="margin:0 0 6px">Si sabes el nº de familia (PGA), escríbelo: se comprueba al momento contra el padrón y, si existe y tiene correo, se incluye en las cartas.</p>
+    <table class="revisar"><thead><tr><th>Titular en el DETIR</th><th class="num">Importe</th><th>Motivo</th><th>Asignar nº familia</th></tr></thead><tbody>${
+      revisar.map((r, i) => `<tr data-row="${i}">
         <td>${esc(r.adeudos[0].titular)}</td>
         <td class="num">${fmtImporte(r.total)} €</td>
         <td>${esc(r.motivo)}</td>
+        <td><input class="asig" data-i="${i}" type="text" inputmode="numeric" placeholder="nº fam."><span class="asig-fb muted" data-fb="${i}"></span></td>
       </tr>`).join('')}</tbody></table>` : '';
 
-  $('#seccionGenerar').classList.toggle('hidden', casan.length === 0);
   limpia('#estadoGenerar');
+}
+
+// Familias resueltas a mano en la tabla "A revisar"
+const resueltos = () => estado.cruce ? estado.cruce.revisar.filter(r => r.asignado) : [];
+// Lo que se generará: las que casaron + las asignadas a mano
+function cartasParaGenerar() {
+  const base = estado.cruce.casan.map(c => ({ info: c.familiaInfo, adeudos: c.adeudos, total: c.total }));
+  const extra = resueltos().map(r => ({ info: r.asignado, adeudos: r.adeudos, total: r.total }));
+  return base.concat(extra);
+}
+function renderResumen() {
+  const { casan, revisar } = estado.cruce;
+  const res = resueltos();
+  const totalCartas = casan.length + res.length;
+  const recibos = casan.reduce((s, c) => s + c.adeudos.length, 0) + res.reduce((s, r) => s + r.adeudos.length, 0);
+  $('#resumen').innerHTML =
+    `<div class="stat"><b>${totalCartas}</b> familias con carta</div>` +
+    `<div class="stat"><b>${revisar.length - res.length}</b> a revisar a mano</div>` +
+    `<div class="stat"><b>${recibos}</b> recibos casados</div>`;
+  $('#seccionGenerar').classList.toggle('hidden', totalCartas === 0);
+}
+// Comprobación en el momento del nº de familia que teclea Manolo
+function asignarRevisar(i, val) {
+  const r = estado.cruce.revisar[i];
+  const fb = $(`[data-fb="${i}"]`);
+  const fila = $(`tr[data-row="${i}"]`);
+  const num = parseInt(String(val).replace(/\D/g, ''), 10);
+  r.asignado = null; fila.classList.remove('resuelto'); fb.style.color = '';
+  if (!String(val).trim()) { fb.className = 'asig-fb muted'; fb.textContent = ''; }
+  else if (!Number.isFinite(num)) { fb.className = 'asig-fb'; fb.style.color = 'var(--rojo)'; fb.textContent = '⚠ nº no válido'; }
+  else {
+    const fam = estado.padron.porFamilia.get(num);
+    fb.className = 'asig-fb';
+    if (!fam) { fb.style.color = 'var(--rojo)'; fb.textContent = `⚠ Familia ${num} no está en el padrón`; }
+    else if (!fam.emails.length) { fb.style.color = 'var(--ambr)'; fb.textContent = `⚠ ${fam.apellidos}: sin correo en el padrón`; }
+    else { r.asignado = fam; fila.classList.add('resuelto'); fb.style.color = 'var(--verde)'; fb.innerHTML = `✓ <b>${esc(fam.apellidos)}</b> · ${fam.emails.map(esc).join(', ')}`; }
+  }
+  renderResumen();
 }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Comprobación en vivo del nº de familia que teclea Manolo en "A revisar"
+$('#tablaRevisar').addEventListener('input', e => {
+  const inp = e.target.closest('input.asig');
+  if (inp) asignarRevisar(+inp.dataset.i, inp.value);
+});
+
 // --- Generación del Word ---
 $('#btnGenerar').onclick = async () => {
-  const { casan } = estado.cruce;
-  if (!casan.length) return;
+  const items = cartasParaGenerar();
+  if (!items.length) return;
   $('#btnGenerar').disabled = true;
   alerta('#estadoGenerar', 'info', 'Generando las cartas…');
   try {
     const fl = estado.detir.header.fechaLiq;
     const fechaCorta = `${fl.d}/${fl.m}/${fl.y}`;
     const mes = mesEs(parseInt(fl.m, 10));
-    const cartas = casan.map(c => ({
-      nomfam: c.familiaInfo.apellidos,
-      numfam: c.familiaInfo.numFam,
+    const cartas = items.map(c => ({
+      nomfam: c.info.apellidos,
+      numfam: c.info.numFam,
       fechaCorta,
       recibos: c.adeudos.map(a => ({ concepto: `Devolución enseñanza ${mes}`, importeFmt: fmtImporte(a.importe) })),
       totalFmt: fmtImporte(c.total),
@@ -587,6 +632,11 @@ $('#btnGenerar').onclick = async () => {
     const outXml = combinarDocumentXml(estado.plantillaXml, cartas);
     const zip = new PizZip(estado.plantillaZip.generate({ type: 'arraybuffer' }));  // copia limpia de la plantilla
     zip.file('word/document.xml', outXml);
+    // La plantilla es un documento de combinación de correspondencia (apunta a un Excel viejo);
+    // quitamos esa configuración para que Word no pida "insertar campos" al abrir el resultado.
+    const settings = zip.file('word/settings.xml');
+    if (settings) zip.file('word/settings.xml',
+      settings.asText().replace(/<w:mailMerge>[\s\S]*?<\/w:mailMerge>/, ''));
     const blob = new Blob([zip.generate({ type: 'arraybuffer' })],
       { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
 
