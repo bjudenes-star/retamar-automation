@@ -44,6 +44,8 @@
   input.asig { font:inherit; padding:4px 7px; border:1px solid var(--bd); border-radius:6px; width:130px; }
   .asig-fb { font-size:.85rem; margin-left:6px; }
   tr.resuelto td { background:#e9f6ee; }
+  input.mail { font:inherit; padding:5px 8px; border:1px solid var(--bd); border-radius:6px; width:100%; box-sizing:border-box; }
+  input.mail.vacio { border-color:var(--rojo); background:#fff6f6; }
   .hidden { display:none; }
   code { background:#eef1f5; padding:1px 5px; border-radius:4px; font-size:.85em; }
   .pill { display:inline-block; background:#eef1f5; border:1px solid var(--bd); border-radius:20px;
@@ -97,11 +99,17 @@
 
   <!-- PASO 4 -->
   <section class="paso hidden" id="seccionGenerar">
-    <h2><span class="num">4</span> Generar las cartas</h2>
-    <p class="muted">Crea un único documento Word con una carta por familia (salto de página entre ellas),
-       listo para que lo revises y lo envíes.</p>
-    <p><button id="btnGenerar">Generar cartas</button></p>
-    <div id="estadoGenerar"></div>
+    <h2><span class="num">4</span> Revisar correos y generar</h2>
+    <p class="muted">Revisa y, si hace falta, <b>corrige el correo</b> de cada familia antes de generar.
+       Puedes poner varios separados por <code>;</code>.</p>
+    <div id="tablaCorreos"></div>
+    <p style="margin-top:14px">
+      <button id="btnExcel">Generar Excel para combinación</button>
+      <button id="btnGenerar" class="sec">Generar cartas en Word</button>
+    </p>
+    <p class="muted" style="margin:2px 0 0">El <b>Excel</b> es el origen de datos para la combinación de correspondencia de Word
+       (campos <code>Nomfam, NumFam, Concepto, Marzo, Total, Email</code>). El <b>Word</b> es el combinado ya hecho, por si lo prefieres imprimir.</p>
+    <div id="estadoGenerar" style="margin-top:10px"></div>
   </section>
 </main>
 
@@ -535,6 +543,7 @@ const fechaCortaDe = d => `${d.header.fechaLiq.d}/${d.header.fechaLiq.m}/${d.hea
 function procesarCruce() {
   const cruce = cruzar(estado.detir, estado.padron);
   estado.cruce = cruce;
+  estado.mailsEdit = {};   // correos corregidos a mano por nº de familia
   const { casan, revisar } = cruce;
   $('#seccionResultados').classList.remove('hidden');
   renderResumen();
@@ -574,6 +583,8 @@ function cartasParaGenerar() {
   const extra = resueltos().map(r => ({ info: r.asignado, adeudos: r.adeudos, total: r.total }));
   return base.concat(extra);
 }
+// Correo efectivo de una familia: el corregido a mano si lo hay, si no el del padrón
+const emailsDe = info => (estado.mailsEdit[info.numFam] ?? info.emails.join('; '));
 function renderResumen() {
   const { casan, revisar } = estado.cruce;
   const res = resueltos();
@@ -584,6 +595,22 @@ function renderResumen() {
     `<div class="stat"><b>${revisar.length - res.length}</b> a revisar a mano</div>` +
     `<div class="stat"><b>${recibos}</b> recibos casados</div>`;
   $('#seccionGenerar').classList.toggle('hidden', totalCartas === 0);
+  renderCorreos();
+}
+// Tabla de correos editables (familias que casaron + asignadas a mano)
+function renderCorreos() {
+  const items = cartasParaGenerar();
+  $('#tablaCorreos').innerHTML = items.length ? `
+    <table><thead><tr><th>Nº fam.</th><th>Apellidos</th><th class="num">Recibos</th><th class="num">Importe</th><th>Correo(s) — editable</th></tr></thead><tbody>${
+      items.map(c => {
+        const mails = emailsDe(c.info);
+        return `<tr>
+        <td class="num">${c.info.numFam}</td>
+        <td>${esc(c.info.apellidos)}</td>
+        <td class="num">${c.adeudos.length}</td>
+        <td class="num">${fmtImporte(c.total)} €</td>
+        <td><input class="mail${mails.trim() ? '' : ' vacio'}" data-fam="${c.info.numFam}" type="text" value="${esc(mails)}" placeholder="correo@ejemplo.com; otro@ejemplo.com"></td>
+      </tr>`; }).join('')}</tbody></table>` : '';
 }
 // Comprobación en el momento del nº de familia que teclea Manolo
 function asignarRevisar(i, val) {
@@ -610,6 +637,56 @@ $('#tablaRevisar').addEventListener('input', e => {
   const inp = e.target.closest('input.asig');
   if (inp) asignarRevisar(+inp.dataset.i, inp.value);
 });
+
+// Edición de los correos antes de enviar (paso 4)
+$('#tablaCorreos').addEventListener('input', e => {
+  const inp = e.target.closest('input.mail');
+  if (!inp) return;
+  estado.mailsEdit[inp.dataset.fam] = inp.value;
+  inp.classList.toggle('vacio', !inp.value.trim());
+});
+
+// --- Generación del Excel para la combinación de correspondencia ---
+$('#btnExcel').onclick = async () => {
+  const items = cartasParaGenerar();
+  if (!items.length) return;
+  const sinCorreo = items.filter(c => !emailsDe(c.info).trim()).map(c => c.info.apellidos);
+  if (sinCorreo.length && !confirm(`Hay ${sinCorreo.length} familia(s) sin correo (${sinCorreo.join(', ')}). Se incluirán igual con el Email vacío. ¿Continuar?`)) return;
+  $('#btnExcel').disabled = true;
+  alerta('#estadoGenerar', 'info', 'Generando el Excel para combinación…');
+  try {
+    const fl = estado.detir.header.fechaLiq;
+    const mes = mesEs(parseInt(fl.m, 10));
+    // Una fila por recibo (la combinación de Word hace una carta por fila)
+    const filas = [];
+    for (const c of items) {
+      const email = emailsDe(c.info).trim();
+      for (const a of c.adeudos) {
+        filas.push({
+          Nomfam: c.info.apellidos,
+          NumFam: c.info.numFam,
+          Concepto: `Devolución enseñanza ${mes}`,
+          Marzo: Number(a.importe),   // importe del recibo (Word le aplica el formato y el €)
+          Total: Number(a.importe),   // sin saldo de Sage: usamos el importe del recibo
+          Email: email,
+        });
+      }
+    }
+    const ws = XLSX.utils.json_to_sheet(filas, { header: ['Nomfam', 'NumFam', 'Concepto', 'Marzo', 'Total', 'Email'] });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Datos');
+    const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const nombre = await guardarSinSobrescribir(blob, `Combinacion_devoluciones_${fl.y}${fl.m}${fl.d}`, 'xlsx', 'Combinacion');
+    alerta('#estadoGenerar', 'ok',
+      `✅ Excel generado con <b>${filas.length}</b> fila(s) (${items.length} familias).<br>Guardado en <code>${estado.dir.name}/Combinacion/${nombre}</code><br>` +
+      `<span class="muted">Ábrelo en Word: Correspondencia → Seleccionar destinatarios → Usar lista existente → este Excel → Finalizar y combinar → Enviar mensajes de correo (campo Para = <b>Email</b>).</span>`);
+  } catch (e) {
+    alerta('#estadoGenerar', 'err', 'No se pudo generar el Excel: ' + e.message);
+  } finally {
+    $('#btnExcel').disabled = false;
+  }
+};
 
 // --- Generación del Word ---
 $('#btnGenerar').onclick = async () => {
@@ -651,12 +728,12 @@ $('#btnGenerar').onclick = async () => {
   }
 };
 
-async function guardarSinSobrescribir(blob, base) {
-  const carpeta = await estado.dir.getDirectoryHandle('Cartas', { create: true });
+async function guardarSinSobrescribir(blob, base, ext = 'docx', carpetaNombre = 'Cartas') {
+  const carpeta = await estado.dir.getDirectoryHandle(carpetaNombre, { create: true });
   const existentes = new Set();
   for await (const [name] of carpeta.entries()) existentes.add(name.toLowerCase());
-  let nombre = `${base}.docx`, n = 2;
-  while (existentes.has(nombre.toLowerCase())) nombre = `${base} (${n++}).docx`;
+  let nombre = `${base}.${ext}`, n = 2;
+  while (existentes.has(nombre.toLowerCase())) nombre = `${base} (${n++}).${ext}`;
   const fh = await carpeta.getFileHandle(nombre, { create: true });
   const w = await fh.createWritable();
   await w.write(blob);
