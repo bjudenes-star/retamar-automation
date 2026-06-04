@@ -100,15 +100,14 @@
   <!-- PASO 4 -->
   <section class="paso hidden" id="seccionGenerar">
     <h2><span class="num">4</span> Generar y enviar</h2>
-    <p class="muted">Genera el <b>Excel + Word</b> para la combinación de correspondencia, o el <b>Word combinado</b> para imprimir.
-       Las familias y sus correos los tienes en el paso 3.</p>
+    <p class="muted">Genera el <b>Excel + Word</b> para la combinación de correspondencia (envío por email), o abre el <b>Word combinado</b>
+       con todas las cartas en un solo documento. Las familias y sus correos los tienes en el paso 3.</p>
     <p style="margin-top:8px">
       <button id="btnExcel">Generar Excel + Word (combinación)</button>
-      <button id="btnGenerar" class="sec">Generar Word combinado (imprimir)</button>
       <button id="btnAbrir" class="sec">Abrir Word combinado</button>
     </p>
     <p class="muted" style="margin:2px 0 0">El botón <b>Excel + Word</b> genera el origen de datos y el Word ya enlazado para combinar y enviar.
-       El <b>Word combinado</b> es el documento con todas las cartas pegadas, por si lo prefieres imprimir.</p>
+       <b>Abrir Word combinado</b> abre directamente el documento con todas las cartas (para revisar o imprimir).</p>
     <div id="estadoGenerar" style="margin-top:10px"></div>
 
     <div style="margin-top:18px;padding:12px 14px;border:1px dashed var(--bd);border-radius:8px;background:#fafbfc">
@@ -747,25 +746,6 @@ function abrirBlob(blob, nombre) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
-
-$('#btnGenerar').onclick = async () => {
-  const items = cartasParaGenerar();
-  if (!items.length) return;
-  $('#btnGenerar').disabled = true;
-  alerta('#estadoGenerar', 'info', 'Generando las cartas…');
-  try {
-    const fl = estado.detir.header.fechaLiq;
-    const { blob, n } = construirWordCombinado(items);
-    const nombre = await guardarSinSobrescribir(blob, `Cartas_devoluciones_${fl.y}${fl.m}${fl.d}`);
-    alerta('#estadoGenerar', 'ok',
-      `✅ Generadas <b>${n}</b> cartas.<br>Guardado en <code>${estado.dir.name}/Cartas/${nombre}</code><br>` +
-      `<span class="muted">Ábrelo en Word, revísalo y envíalo a las familias.</span>`);
-  } catch (e) {
-    alerta('#estadoGenerar', 'err', 'No se pudieron generar las cartas: ' + e.message);
-  } finally {
-    $('#btnGenerar').disabled = false;
-  }
-};
 
 // Abrir el Word combinado directamente (lo genera y lo descarga; al abrir la descarga se abre en Word)
 $('#btnAbrir').onclick = async () => {
