@@ -105,6 +105,7 @@
     <p style="margin-top:8px">
       <button id="btnExcel">Generar Excel + Word (combinación)</button>
       <button id="btnGenerar" class="sec">Generar Word combinado (imprimir)</button>
+      <button id="btnAbrir" class="sec">Abrir Word combinado</button>
     </p>
     <p class="muted" style="margin:2px 0 0">El botón <b>Excel + Word</b> genera el origen de datos y el Word ya enlazado para combinar y enviar.
        El <b>Word combinado</b> es el documento con todas las cartas pegadas, por si lo prefieres imprimir.</p>
@@ -715,7 +716,38 @@ $('#btnPrueba').onclick = async () => {
   }
 };
 
-// --- Generación del Word ---
+// --- Word combinado (documento único con todas las cartas) ---
+// Construye el .docx combinado y devuelve { blob, n }
+function construirWordCombinado(items) {
+  const fl = estado.detir.header.fechaLiq;
+  const fechaCorta = `${fl.d}/${fl.m}/${fl.y}`;
+  const mes = mesEs(parseInt(fl.m, 10));
+  const cartas = items.map(c => ({
+    nomfam: c.info.apellidos,
+    numfam: c.info.numFam,
+    fechaCorta,
+    recibos: c.adeudos.map(a => ({ concepto: `Devolución enseñanza ${mes}`, importeFmt: fmtImporte(a.importe) })),
+    totalFmt: fmtImporte(c.total),
+  }));
+  const outXml = combinarDocumentXml(estado.plantillaXml, cartas);
+  const zip = new PizZip(estado.plantillaZip.generate({ type: 'arraybuffer' }));  // copia limpia de la plantilla
+  zip.file('word/document.xml', outXml);
+  // La plantilla es un documento de combinación de correspondencia (apunta a un Excel viejo);
+  // quitamos esa configuración para que Word no pida "insertar campos" al abrir el resultado.
+  const settings = zip.file('word/settings.xml');
+  if (settings) zip.file('word/settings.xml',
+    settings.asText().replace(/<w:mailMerge>[\s\S]*?<\/w:mailMerge>/, ''));
+  return { blob: new Blob([zip.generate({ type: 'arraybuffer' })], { type: MIME_DOCX }), n: cartas.length };
+}
+// Descarga un blob (el navegador no puede lanzar Word; al abrir la descarga se abre en Word)
+function abrirBlob(blob, nombre) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nombre;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
 $('#btnGenerar').onclick = async () => {
   const items = cartasParaGenerar();
   if (!items.length) return;
@@ -723,35 +755,35 @@ $('#btnGenerar').onclick = async () => {
   alerta('#estadoGenerar', 'info', 'Generando las cartas…');
   try {
     const fl = estado.detir.header.fechaLiq;
-    const fechaCorta = `${fl.d}/${fl.m}/${fl.y}`;
-    const mes = mesEs(parseInt(fl.m, 10));
-    const cartas = items.map(c => ({
-      nomfam: c.info.apellidos,
-      numfam: c.info.numFam,
-      fechaCorta,
-      recibos: c.adeudos.map(a => ({ concepto: `Devolución enseñanza ${mes}`, importeFmt: fmtImporte(a.importe) })),
-      totalFmt: fmtImporte(c.total),
-    }));
-
-    const outXml = combinarDocumentXml(estado.plantillaXml, cartas);
-    const zip = new PizZip(estado.plantillaZip.generate({ type: 'arraybuffer' }));  // copia limpia de la plantilla
-    zip.file('word/document.xml', outXml);
-    // La plantilla es un documento de combinación de correspondencia (apunta a un Excel viejo);
-    // quitamos esa configuración para que Word no pida "insertar campos" al abrir el resultado.
-    const settings = zip.file('word/settings.xml');
-    if (settings) zip.file('word/settings.xml',
-      settings.asText().replace(/<w:mailMerge>[\s\S]*?<\/w:mailMerge>/, ''));
-    const blob = new Blob([zip.generate({ type: 'arraybuffer' })],
-      { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-
+    const { blob, n } = construirWordCombinado(items);
     const nombre = await guardarSinSobrescribir(blob, `Cartas_devoluciones_${fl.y}${fl.m}${fl.d}`);
     alerta('#estadoGenerar', 'ok',
-      `✅ Generadas <b>${cartas.length}</b> cartas.<br>Guardado en <code>${estado.dir.name}/Cartas/${nombre}</code><br>` +
+      `✅ Generadas <b>${n}</b> cartas.<br>Guardado en <code>${estado.dir.name}/Cartas/${nombre}</code><br>` +
       `<span class="muted">Ábrelo en Word, revísalo y envíalo a las familias.</span>`);
   } catch (e) {
     alerta('#estadoGenerar', 'err', 'No se pudieron generar las cartas: ' + e.message);
   } finally {
     $('#btnGenerar').disabled = false;
+  }
+};
+
+// Abrir el Word combinado directamente (lo genera y lo descarga; al abrir la descarga se abre en Word)
+$('#btnAbrir').onclick = async () => {
+  const items = cartasParaGenerar();
+  if (!items.length) return;
+  $('#btnAbrir').disabled = true;
+  alerta('#estadoGenerar', 'info', 'Preparando el Word combinado…');
+  try {
+    const fl = estado.detir.header.fechaLiq;
+    const { blob, n } = construirWordCombinado(items);
+    abrirBlob(blob, `Cartas_devoluciones_${fl.y}${fl.m}${fl.d}.docx`);
+    alerta('#estadoGenerar', 'ok',
+      `📄 Word combinado con <b>${n}</b> cartas descargado.<br>` +
+      `<span class="muted">Ábrelo desde la descarga del navegador (se abrirá en Word). El navegador no puede lanzar Word por sí solo.</span>`);
+  } catch (e) {
+    alerta('#estadoGenerar', 'err', 'No se pudo abrir el Word: ' + e.message);
+  } finally {
+    $('#btnAbrir').disabled = false;
   }
 };
 
