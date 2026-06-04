@@ -100,8 +100,8 @@
   <!-- PASO 4 -->
   <section class="paso hidden" id="seccionGenerar">
     <h2><span class="num">4</span> Revisar correos y generar</h2>
-    <p class="muted">Revisa y, si hace falta, <b>corrige el correo</b> de cada familia antes de generar.
-       Puedes poner varios separados por <code>;</code>.</p>
+    <p class="muted">Estas son las familias que recibirán carta y los correos a los que se enviará.
+       Para probar el envío sin tocar a las familias, usa la caja de prueba de más abajo.</p>
     <div id="tablaCorreos"></div>
     <p style="margin-top:14px">
       <button id="btnExcel">Generar Excel + Word (combinación)</button>
@@ -609,15 +609,15 @@ function renderResumen() {
 function renderCorreos() {
   const items = cartasParaGenerar();
   $('#tablaCorreos').innerHTML = items.length ? `
-    <table><thead><tr><th>Nº fam.</th><th>Apellidos</th><th class="num">Recibos</th><th class="num">Importe</th><th>Correo(s) — editable</th></tr></thead><tbody>${
+    <table><thead><tr><th>Nº fam.</th><th>Apellidos</th><th class="num">Recibos</th><th class="num">Importe</th><th>Correo(s)</th></tr></thead><tbody>${
       items.map(c => {
-        const mails = emailsDe(c.info);
+        const mails = emailsDe(c.info).trim();
         return `<tr>
         <td class="num">${c.info.numFam}</td>
         <td>${esc(c.info.apellidos)}</td>
         <td class="num">${c.adeudos.length}</td>
         <td class="num">${fmtImporte(c.total)} €</td>
-        <td><input class="mail${mails.trim() ? '' : ' vacio'}" data-fam="${c.info.numFam}" type="text" value="${esc(mails)}" placeholder="correo@ejemplo.com; otro@ejemplo.com"></td>
+        <td class="${mails ? 'muted' : ''}" ${mails ? '' : 'style="color:var(--rojo)"'}>${mails ? esc(mails) : '⚠ sin correo'}</td>
       </tr>`; }).join('')}</tbody></table>` : '';
 }
 // Comprobación en el momento del nº de familia que teclea Manolo
@@ -644,14 +644,6 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;',
 $('#tablaRevisar').addEventListener('input', e => {
   const inp = e.target.closest('input.asig');
   if (inp) asignarRevisar(+inp.dataset.i, inp.value);
-});
-
-// Edición de los correos antes de enviar (paso 4)
-$('#tablaCorreos').addEventListener('input', e => {
-  const inp = e.target.closest('input.mail');
-  if (!inp) return;
-  estado.mailsEdit[inp.dataset.fam] = inp.value;
-  inp.classList.toggle('vacio', !inp.value.trim());
 });
 
 // --- Generación del Excel + Word para la combinación de correspondencia ---
