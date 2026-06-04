@@ -99,11 +99,10 @@
 
   <!-- PASO 4 -->
   <section class="paso hidden" id="seccionGenerar">
-    <h2><span class="num">4</span> Revisar correos y generar</h2>
-    <p class="muted">Estas son las familias que recibirán carta y los correos a los que se enviará.
-       Para probar el envío sin tocar a las familias, usa la caja de prueba de más abajo.</p>
-    <div id="tablaCorreos"></div>
-    <p style="margin-top:14px">
+    <h2><span class="num">4</span> Generar y enviar</h2>
+    <p class="muted">Genera el <b>Excel + Word</b> para la combinación de correspondencia, o el <b>Word combinado</b> para imprimir.
+       Las familias y sus correos los tienes en el paso 3.</p>
+    <p style="margin-top:8px">
       <button id="btnExcel">Generar Excel + Word (combinación)</button>
       <button id="btnGenerar" class="sec">Generar Word combinado (imprimir)</button>
     </p>
@@ -603,22 +602,6 @@ function renderResumen() {
     `<div class="stat"><b>${revisar.length - res.length}</b> a revisar a mano</div>` +
     `<div class="stat"><b>${recibos}</b> recibos casados</div>`;
   $('#seccionGenerar').classList.toggle('hidden', totalCartas === 0);
-  renderCorreos();
-}
-// Tabla de correos editables (familias que casaron + asignadas a mano)
-function renderCorreos() {
-  const items = cartasParaGenerar();
-  $('#tablaCorreos').innerHTML = items.length ? `
-    <table><thead><tr><th>Nº fam.</th><th>Apellidos</th><th class="num">Recibos</th><th class="num">Importe</th><th>Correo(s)</th></tr></thead><tbody>${
-      items.map(c => {
-        const mails = emailsDe(c.info).trim();
-        return `<tr>
-        <td class="num">${c.info.numFam}</td>
-        <td>${esc(c.info.apellidos)}</td>
-        <td class="num">${c.adeudos.length}</td>
-        <td class="num">${fmtImporte(c.total)} €</td>
-        <td class="${mails ? 'muted' : ''}" ${mails ? '' : 'style="color:var(--rojo)"'}>${mails ? esc(mails) : '⚠ sin correo'}</td>
-      </tr>`; }).join('')}</tbody></table>` : '';
 }
 // Comprobación en el momento del nº de familia que teclea Manolo
 function asignarRevisar(i, val) {
