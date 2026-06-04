@@ -104,12 +104,20 @@
        Puedes poner varios separados por <code>;</code>.</p>
     <div id="tablaCorreos"></div>
     <p style="margin-top:14px">
-      <button id="btnExcel">Generar Excel para combinación</button>
-      <button id="btnGenerar" class="sec">Generar cartas en Word</button>
+      <button id="btnExcel">Generar Excel + Word (combinación)</button>
+      <button id="btnGenerar" class="sec">Generar Word combinado (imprimir)</button>
     </p>
-    <p class="muted" style="margin:2px 0 0">El <b>Excel</b> es el origen de datos para la combinación de correspondencia de Word
-       (campos <code>Nomfam, NumFam, Concepto, Marzo, Total, Email</code>). El <b>Word</b> es el combinado ya hecho, por si lo prefieres imprimir.</p>
+    <p class="muted" style="margin:2px 0 0">El botón <b>Excel + Word</b> genera el origen de datos y el Word ya enlazado para combinar y enviar.
+       El <b>Word combinado</b> es el documento con todas las cartas pegadas, por si lo prefieres imprimir.</p>
     <div id="estadoGenerar" style="margin-top:10px"></div>
+
+    <div style="margin-top:18px;padding:12px 14px;border:1px dashed var(--bd);border-radius:8px;background:#fafbfc">
+      <b>🧪 Probar la combinación</b>
+      <p class="muted" style="margin:4px 0 8px">Pon 3-4 correos tuyos (uno por línea o separados por <code>;</code>). Genera un Excel + Word de <b>PRUEBA</b>
+         que manda las cartas a esos correos — <b>no</b> a las familias reales. Úsalo para comprobar que el envío funciona.</p>
+      <textarea id="correosPrueba" rows="3" placeholder="tucorreo@gmail.com&#10;otro@gmail.com" style="width:100%;box-sizing:border-box;font:inherit;padding:6px 8px;border:1px solid var(--bd);border-radius:6px"></textarea>
+      <p style="margin:8px 0 0"><button id="btnPrueba" class="sec">Generar PRUEBA (Excel + Word)</button></p>
+    </div>
   </section>
 </main>
 
@@ -646,45 +654,89 @@ $('#tablaCorreos').addEventListener('input', e => {
   inp.classList.toggle('vacio', !inp.value.trim());
 });
 
-// --- Generación del Excel para la combinación de correspondencia ---
+// --- Generación del Excel + Word para la combinación de correspondencia ---
+const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const MIME_DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+// Excel (hoja 'Libro mayor', que es la que espera la consulta de la plantilla) a partir de filas
+function excelDeFilas(filas) {
+  const ws = XLSX.utils.json_to_sheet(filas, { header: ['Nomfam', 'NumFam', 'Concepto', 'Marzo', 'Total', 'Email'] });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Libro mayor');
+  return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+}
+// Word de combinación: la plantilla original (con sus campos y su mailMerge) reapuntada a nuestro Excel
+function wordEnlazado(nombreExcel) {
+  const zip = new PizZip(estado.plantillaZip.generate({ type: 'arraybuffer' }));
+  let s = zip.file('word/settings.xml').asText();
+  s = s.replace(/Data Source=[^;]*;/g, `Data Source=${nombreExcel};`);   // connectString + udl
+  s = s.replace(/<w:addressFieldName w:val="[^"]*"\s*\/>/, '<w:addressFieldName w:val="Email"/>');
+  zip.file('word/settings.xml', s);
+  const rels = zip.file('word/_rels/settings.xml.rels');
+  if (rels) zip.file('word/_rels/settings.xml.rels', rels.asText().replace(/Target="[^"]*"/g, `Target="${nombreExcel}"`));
+  return zip.generate({ type: 'arraybuffer' });
+}
+// Genera y guarda el par Excel + Word enlazado; devuelve los nombres
+async function generarParCombinacion(filas, base) {
+  const nombreXlsx = await guardarSinSobrescribir(new Blob([excelDeFilas(filas)], { type: MIME_XLSX }), base, 'xlsx', 'Combinacion');
+  const nombreDoc = await guardarSinSobrescribir(new Blob([wordEnlazado(nombreXlsx)], { type: MIME_DOCX }), `${base}_COMBINAR`, 'docx', 'Combinacion');
+  return { nombreXlsx, nombreDoc };
+}
+
 $('#btnExcel').onclick = async () => {
   const items = cartasParaGenerar();
   if (!items.length) return;
   const sinCorreo = items.filter(c => !emailsDe(c.info).trim()).map(c => c.info.apellidos);
   if (sinCorreo.length && !confirm(`Hay ${sinCorreo.length} familia(s) sin correo (${sinCorreo.join(', ')}). Se incluirán igual con el Email vacío. ¿Continuar?`)) return;
   $('#btnExcel').disabled = true;
-  alerta('#estadoGenerar', 'info', 'Generando el Excel para combinación…');
+  alerta('#estadoGenerar', 'info', 'Generando el Excel y el Word de combinación…');
   try {
     const fl = estado.detir.header.fechaLiq;
     const mes = mesEs(parseInt(fl.m, 10));
-    // Una fila por recibo (la combinación de Word hace una carta por fila)
-    const filas = [];
+    const filas = [];   // una fila por recibo (la combinación hace una carta por fila)
     for (const c of items) {
       const email = emailsDe(c.info).trim();
-      for (const a of c.adeudos) {
-        filas.push({
-          Nomfam: c.info.apellidos,
-          NumFam: c.info.numFam,
-          Concepto: `Devolución enseñanza ${mes}`,
-          Marzo: Number(a.importe),   // importe del recibo (Word le aplica el formato y el €)
-          Total: Number(a.importe),   // sin saldo de Sage: usamos el importe del recibo
-          Email: email,
-        });
-      }
+      for (const a of c.adeudos)
+        filas.push({ Nomfam: c.info.apellidos, NumFam: c.info.numFam, Concepto: `Devolución enseñanza ${mes}`, Marzo: Number(a.importe), Total: Number(a.importe), Email: email });
     }
-    const ws = XLSX.utils.json_to_sheet(filas, { header: ['Nomfam', 'NumFam', 'Concepto', 'Marzo', 'Total', 'Email'] });
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Datos');
-    const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-    const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const nombre = await guardarSinSobrescribir(blob, `Combinacion_devoluciones_${fl.y}${fl.m}${fl.d}`, 'xlsx', 'Combinacion');
+    const { nombreXlsx, nombreDoc } = await generarParCombinacion(filas, `Combinacion_devoluciones_${fl.y}${fl.m}${fl.d}`);
     alerta('#estadoGenerar', 'ok',
-      `✅ Excel generado con <b>${filas.length}</b> fila(s) (${items.length} familias).<br>Guardado en <code>${estado.dir.name}/Combinacion/${nombre}</code><br>` +
-      `<span class="muted">Ábrelo en Word: Correspondencia → Seleccionar destinatarios → Usar lista existente → este Excel → Finalizar y combinar → Enviar mensajes de correo (campo Para = <b>Email</b>).</span>`);
+      `✅ Generados en <code>${estado.dir.name}/Combinacion/</code> (${filas.length} fila(s), ${items.length} familias):<br>` +
+      `• <code>${nombreXlsx}</code> — datos<br>• <code>${nombreDoc}</code> — Word ya enlazado<br>` +
+      `<span class="muted">Abre el Word. Si Word te pide localizar el origen de datos, elige ese Excel (está al lado). Luego: Finalizar y combinar → Enviar mensajes de correo.</span>`);
   } catch (e) {
-    alerta('#estadoGenerar', 'err', 'No se pudo generar el Excel: ' + e.message);
+    alerta('#estadoGenerar', 'err', 'No se pudo generar: ' + e.message);
   } finally {
     $('#btnExcel').disabled = false;
+  }
+};
+
+// Modo prueba: genera el par Excel+Word usando datos reales pero enviando a los correos de prueba
+$('#btnPrueba').onclick = async () => {
+  const correos = $('#correosPrueba').value.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+  if (!correos.length) { alerta('#estadoGenerar', 'warn', 'Escribe al menos un correo de prueba.'); return; }
+  if (!estado.detir) { alerta('#estadoGenerar', 'warn', 'Carga primero un DETIR para tener datos de ejemplo.'); return; }
+  $('#btnPrueba').disabled = true;
+  alerta('#estadoGenerar', 'info', 'Generando la PRUEBA…');
+  try {
+    const fl = estado.detir.header.fechaLiq;
+    const mes = mesEs(parseInt(fl.m, 10));
+    const items = cartasParaGenerar();
+    // una fila por correo de prueba, con datos de una familia real (o de ejemplo si no hay)
+    const filas = correos.map((email, i) => {
+      const c = items[i % items.length] || null;
+      const info = c ? c.info : { apellidos: `Prueba ${i + 1}`, numFam: 9000 + i };
+      const imp = c ? c.total : 123.45;
+      return { Nomfam: info.apellidos, NumFam: info.numFam, Concepto: `Devolución enseñanza ${mes} (PRUEBA)`, Marzo: Number(imp), Total: Number(imp), Email: email };
+    });
+    const { nombreDoc } = await generarParCombinacion(filas, `PRUEBA_combinacion_${fl.y}${fl.m}${fl.d}`);
+    alerta('#estadoGenerar', 'ok',
+      `🧪 PRUEBA con <b>${filas.length}</b> correo(s) generada en <code>${estado.dir.name}/Combinacion/</code>:<br>• <code>${nombreDoc}</code><br>` +
+      `<span class="muted">Ábrelo, combina y envía: te llegarán ${filas.length} correos a las direcciones de prueba. Si todo va bien, usa luego el botón de arriba para el envío real.</span>`);
+  } catch (e) {
+    alerta('#estadoGenerar', 'err', 'No se pudo generar la prueba: ' + e.message);
+  } finally {
+    $('#btnPrueba').disabled = false;
   }
 };
 
