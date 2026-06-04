@@ -92,6 +92,7 @@
   <!-- PASO 3 -->
   <section class="paso hidden" id="seccionResultados">
     <h2><span class="num">3</span> Resultado del cruce</h2>
+    <div id="avisoDetir"></div>
     <div class="resumen" id="resumen"></div>
     <div id="tablaCasan"></div>
     <div id="tablaRevisar"></div>
@@ -583,6 +584,24 @@ function procesarCruce() {
       </tr>`).join('')}</tbody></table>` : '';
 
   limpia('#estadoGenerar');
+  comprobarDetirProcesado();   // avisa si este DETIR ya se procesó antes
+}
+
+// Avisa si el DETIR actual ya aparece en el registro como envío real (EMAIL o WORD)
+async function comprobarDetirProcesado() {
+  const aviso = $('#avisoDetir');
+  aviso.innerHTML = '';
+  try {
+    const fh = await estado.dir.getFileHandle('Registro_envios.csv');
+    const huella = huellaDetir();
+    const previos = (await (await fh.getFile()).text()).trim().split('\n').slice(1)
+      .map(l => l.split(';')).filter(c => c[7] === huella && (c[2] === 'EMAIL' || c[2] === 'WORD'));
+    if (previos.length) {
+      const ult = previos[previos.length - 1];
+      aviso.innerHTML = `<div class="alert warn">⚠ <b>Este DETIR ya lo procesaste</b> (última vez: ${esc(ult[0])}, tipo <b>${esc(ult[2])}</b>). ` +
+        `Revisa el registro de envíos antes de volver a generar para no duplicar.</div>`;
+    }
+  } catch (e) { /* no hay registro todavía: no se ha procesado nada */ }
 }
 
 // Familias resueltas a mano en la tabla "A revisar"
@@ -744,7 +763,12 @@ function construirWordCombinado(items) {
   return { blob: new Blob([zip.generate({ type: 'arraybuffer' })], { type: MIME_DOCX }), n: cartas.length };
 }
 // --- Registro de envíos (CSV persistente en la carpeta de trabajo) ---
-const CABECERA_REG = 'FechaHora;FechaDETIR;Tipo;NumFamilia;Apellidos;Importe;Correos';
+const CABECERA_REG = 'FechaHora;FechaDETIR;Tipo;NumFamilia;Apellidos;Importe;Correos;DetirID';
+// Huella del DETIR para detectar si ya se procesó (fecha + importe total + nº de recibos)
+function huellaDetir() {
+  const h = estado.detir.header;
+  return `${h.fechaLiq.d}/${h.fechaLiq.m}/${h.fechaLiq.y}|${h.totalDeclarado}|${estado.detir.adeudos.length}`;
+}
 const dosDig = n => String(n).padStart(2, '0');
 function ahoraTexto() {
   const d = new Date();
@@ -759,8 +783,9 @@ async function registrarEnvio(tipo, regs) {
   const fh = await estado.dir.getFileHandle('Registro_envios.csv', { create: true });
   let texto = (await (await fh.getFile()).text()).trim();
   if (!texto) texto = CABECERA_REG;
+  const id = huellaDetir();
   for (const r of regs)
-    texto += '\n' + [stamp, fechaDetir, tipo, r.numFam, r.apellidos, fmtImporte(r.importe), r.correos].map(celdaCsv).join(';');
+    texto += '\n' + [stamp, fechaDetir, tipo, r.numFam, r.apellidos, fmtImporte(r.importe), r.correos, id].map(celdaCsv).join(';');
   const w = await fh.createWritable();
   await w.write(texto + '\n');
   await w.close();
