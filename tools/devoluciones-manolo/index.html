@@ -101,15 +101,13 @@
   <!-- PASO 4 -->
   <section class="paso hidden" id="seccionGenerar">
     <h2><span class="num">4</span> Generar y enviar</h2>
-    <p class="muted">Genera el <b>Excel + Word</b> para la combinación de correspondencia (envío por email), o abre el <b>Word combinado</b>
-       con todas las cartas en un solo documento. Las familias y sus correos los tienes en el paso 3.</p>
+    <p class="muted">Genera el <b>Excel + Word</b> para la combinación de correspondencia y el envío por email.
+       Las familias y sus correos los tienes en el paso 3.</p>
     <p style="margin-top:8px">
       <button id="btnExcel">Generar Excel + Word (combinación)</button>
-      <button id="btnAbrir" class="sec">Generar Word combinado</button>
       <button id="btnRegistro" class="sec">Ver registro de envíos</button>
     </p>
     <p class="muted" style="margin:2px 0 0">El botón <b>Excel + Word</b> genera el origen de datos y el Word ya enlazado para combinar y enviar.
-       <b>Word combinado</b> guarda en la carpeta el documento con todas las cartas (para revisar o imprimir).
        Cada generación queda anotada en el <b>registro de envíos</b>.</p>
     <div id="estadoGenerar" style="margin-top:10px"></div>
     <div id="tablaRegistro" style="margin-top:10px"></div>
@@ -790,27 +788,6 @@ async function registrarEnvio(tipo, regs) {
   await w.write(texto + '\n');
   await w.close();
 }
-
-// Generar el Word combinado y guardarlo en la carpeta (sin descargar)
-$('#btnAbrir').onclick = async () => {
-  const items = cartasParaGenerar();
-  if (!items.length) return;
-  $('#btnAbrir').disabled = true;
-  alerta('#estadoGenerar', 'info', 'Generando el Word combinado…');
-  try {
-    const fl = estado.detir.header.fechaLiq;
-    const { blob, n } = construirWordCombinado(items);
-    const nombre = await guardarSinSobrescribir(blob, `Cartas_devoluciones_${fl.y}${fl.m}${fl.d}`);
-    await registrarEnvio('WORD', items.map(c => ({ numFam: c.info.numFam, apellidos: c.info.apellidos, importe: c.total, correos: emailsDe(c.info).trim() })));
-    alerta('#estadoGenerar', 'ok',
-      `✅ Word combinado con <b>${n}</b> cartas guardado en <code>${estado.dir.name}/Cartas/${nombre}</code>.<br>` +
-      `<span class="muted">Anotado en el registro de envíos.</span>`);
-  } catch (e) {
-    alerta('#estadoGenerar', 'err', 'No se pudo generar el Word: ' + e.message);
-  } finally {
-    $('#btnAbrir').disabled = false;
-  }
-};
 
 // Ver el registro de envíos (lee el CSV de la carpeta y lo muestra)
 $('#btnRegistro').onclick = async () => {
