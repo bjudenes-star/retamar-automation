@@ -41,7 +41,7 @@
   .alert.ok { background:#e9f6ee; color:var(--verde); border:1px solid #c2e6cf; }
   .alert.info{ background:#eaf1fb; color:var(--azul); border:1px solid #c9dcf5; }
   .revisar td { background:#fffdf6; }
-  input.asig { font:inherit; padding:4px 7px; border:1px solid var(--bd); border-radius:6px; width:92px; }
+  input.asig { font:inherit; padding:4px 7px; border:1px solid var(--bd); border-radius:6px; width:130px; }
   .asig-fb { font-size:.85rem; margin-left:6px; }
   tr.resuelto td { background:#e9f6ee; }
   .hidden { display:none; }
@@ -560,7 +560,7 @@ function procesarCruce() {
         <td>${esc(r.adeudos[0].titular)}</td>
         <td class="num">${fmtImporte(r.total)} €</td>
         <td>${esc(r.motivo)}</td>
-        <td><input class="asig" data-i="${i}" type="text" inputmode="numeric" placeholder="nº fam."><span class="asig-fb muted" data-fb="${i}"></span></td>
+        <td><input class="asig" data-i="${i}" type="text" inputmode="numeric" placeholder="nº familia PGA"><span class="asig-fb muted" data-fb="${i}"></span></td>
       </tr>`).join('')}</tbody></table>` : '';
 
   limpia('#estadoGenerar');
