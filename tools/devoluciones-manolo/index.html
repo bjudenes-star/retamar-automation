@@ -152,6 +152,19 @@ function conceptoCarta(adeudo, mes) {
   const nombre = m && SERIES[m[1].toUpperCase()];
   return nombre ? `Devolución ${nombre} ${mes}` : `Devolución enseñanza ${mes}`;
 }
+// Como fmtImporte pero siempre con dos decimales (importes en el cuerpo de la carta)
+const fmtEuros = n => { const [e0, d] = n.toFixed(2).split('.'); return e0.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + d; };
+const fmtVto = v => (v || '').replace(/-/g, '/');
+// Parte variable de la frase de la carta: "su banco ha devuelto «Detalle»."
+// Singular para un recibo; para varios, lista con el TOTAL al final.
+function detalleCarta(adeudos, mes, total) {
+  if (adeudos.length === 1) {
+    const a = adeudos[0];
+    return `el recibo “${conceptoCarta(a, mes)}” con fecha ${fmtVto(a.vto)} por importe ${fmtEuros(a.importe)} €`;
+  }
+  const partes = adeudos.map(a => `“${conceptoCarta(a, mes)}” — ${fmtVto(a.vto)} — ${fmtEuros(a.importe)} €`);
+  return `los siguientes recibos: ${partes.join(' · ')} · TOTAL: ${fmtEuros(total)} €`;
+}
 
 function normNombre(s) {
   return (s || '')
@@ -294,11 +307,6 @@ function setRunText(doc, run, text) {
   run.appendChild(t);
   return run;
 }
-function ensureRPr(doc, run) {
-  let rpr = Array.from(run.childNodes).find(c => LN(c) === 'rPr');
-  if (!rpr) { rpr = mk(doc, 'w:rPr'); run.insertBefore(rpr, run.firstChild); }
-  return rpr;
-}
 function resolverCampo(doc, nodes, nombre, valor) {
   const re = new RegExp('MERGEFIELD\\s+' + nombre + '(?:\\b|\\\\)', 'i');
   for (const p of paragraphsIn(nodes)) {
@@ -324,25 +332,6 @@ function resolverCampo(doc, nodes, nombre, valor) {
     }
   }
 }
-function setCellText(doc, tc, text, { bold } = {}) {
-  const p = tc.getElementsByTagName('w:p')[0];
-  const runs = childRuns(p);
-  const tmpl = (runs[0] || mk(doc, 'w:r')).cloneNode(true);
-  setRunText(doc, tmpl, text);
-  if (bold) {
-    const rpr = ensureRPr(doc, tmpl);
-    if (!Array.from(rpr.childNodes).some(c => LN(c) === 'b')) rpr.insertBefore(mk(doc, 'w:b'), rpr.firstChild);
-  }
-  for (const r of runs) p.removeChild(r);
-  p.appendChild(tmpl);
-}
-function boldRuns(doc, scope) {
-  for (const r of scope.getElementsByTagName('w:r')) {
-    if (!runHasText(r)) continue;
-    const rpr = ensureRPr(doc, r);
-    if (!Array.from(rpr.childNodes).some(c => LN(c) === 'b')) rpr.insertBefore(mk(doc, 'w:b'), rpr.firstChild);
-  }
-}
 function setPageBreakBefore(doc, nodes) {
   const p = paragraphsIn(nodes)[0];
   if (!p) return;
@@ -353,44 +342,10 @@ function setPageBreakBefore(doc, nodes) {
 }
 function aplicarCarta(doc, nodes, carta, pageBreak) {
   if (pageBreak) setPageBreakBefore(doc, nodes);
-  for (const t of nodes.flatMap(n => isEl(n) ? Array.from(n.getElementsByTagName('w:t')) : [])) {
-    if (/ha sido devuelto el siguiente recibo/i.test(t.textContent) && carta.recibos.length > 1)
-      t.textContent = t.textContent.replace('ha sido devuelto el siguiente recibo', 'han sido devueltos los siguientes recibos');
-  }
   resolverCampo(doc, nodes, 'Nomfam', carta.nomfam);
   resolverCampo(doc, nodes, 'NumFam', String(carta.numfam));
-
-  const tbl = nodes.find(n => isEl(n) && LN(n) === 'tbl') ||
-              nodes.flatMap(n => isEl(n) ? Array.from(n.getElementsByTagName('w:tbl')) : [])[0];
-  const filas = Array.from(tbl.getElementsByTagName('w:tr'));
-  const plantillaFila = filas[1];
-  const celdasDe = tr => Array.from(tr.getElementsByTagName('w:tc'));
-
-  for (const rec of carta.recibos) {
-    const clon = plantillaFila.cloneNode(true);
-    const tc = celdasDe(clon);
-    setCellText(doc, tc[0], carta.fechaCorta);
-    resolverCampo(doc, [tc[1]], 'Concepto', rec.concepto);
-    resolverCampo(doc, [tc[2]], 'Marzo', rec.importeFmt);   // el " €" lo aporta la plantilla
-    plantillaFila.parentNode.insertBefore(clon, plantillaFila);
-  }
-  const filaTotal = plantillaFila.cloneNode(true);
-  const tct = celdasDe(filaTotal);
-  setCellText(doc, tct[0], '');
-  setCellText(doc, tct[1], 'TOTAL', { bold: true });
-  resolverCampo(doc, [tct[2]], 'Marzo', carta.totalFmt);
-  boldRuns(doc, tct[2]);
-  plantillaFila.parentNode.insertBefore(filaTotal, plantillaFila);
-  plantillaFila.parentNode.removeChild(plantillaFila);
-
-  // v1: se omite la frase del "importe total pendiente" (saldo de Sage).
-  // Hueco para el futuro: cuando se integre Sage, sustituir por el saldo real en vez de eliminar.
-  const quitar = new Set();
-  for (const p of paragraphsIn(nodes)) {
-    const txt = Array.from(p.getElementsByTagName('w:t')).map(t => t.textContent).join('');
-    if (/importe total pendiente a/i.test(txt)) { if (p.parentNode) p.parentNode.removeChild(p); else quitar.add(p); }
-  }
-  return nodes.filter(n => !quitar.has(n));
+  resolverCampo(doc, nodes, 'Detalle', carta.detalle);
+  return nodes;
 }
 function combinarDocumentXml(xml, cartas) {
   const doc = new DOMParser().parseFromString(xml, 'application/xml');
@@ -498,6 +453,8 @@ async function cargarFicherosCarpeta() {
 
   estado.plantillaZip = new PizZip(await (await docx.getFile()).arrayBuffer());
   estado.plantillaXml = estado.plantillaZip.file('word/document.xml').asText();
+  if (!/MERGEFIELD\s+Detalle/i.test(estado.plantillaXml))
+    throw new Error(`La plantilla <code>${docx.name}</code> es la versión antigua (sin el campo <code>Detalle</code>). Sustitúyela por la plantilla actualizada de junio 2026.`);
   estado.nombrePlantilla = docx.name;
 }
 
@@ -680,7 +637,7 @@ const MIME_DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingm
 
 // Excel (hoja 'Libro mayor', que es la que espera la consulta de la plantilla) a partir de filas
 function excelDeFilas(filas) {
-  const ws = XLSX.utils.json_to_sheet(filas, { header: ['Nomfam', 'NumFam', 'Concepto', 'Marzo', 'Total', 'Email'] });
+  const ws = XLSX.utils.json_to_sheet(filas, { header: ['Nomfam', 'NumFam', 'Detalle', 'Total', 'Email'] });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Libro mayor');
   return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
@@ -694,13 +651,6 @@ function wordEnlazado(nombreExcel) {
   zip.file('word/settings.xml', s);
   const rels = zip.file('word/_rels/settings.xml.rels');
   if (rels) zip.file('word/_rels/settings.xml.rels', rels.asText().replace(/Target="[^"]*"/g, `Target="${nombreExcel}"`));
-  // Quita la frase del "importe total pendiente" (saldo de Sage que no tenemos), manteniendo los campos de combinación
-  const doc = new DOMParser().parseFromString(zip.file('word/document.xml').asText(), 'application/xml');
-  for (const p of Array.from(doc.getElementsByTagName('w:p'))) {
-    const txt = Array.from(p.getElementsByTagName('w:t')).map(t => t.textContent).join('');
-    if (/importe total pendiente a/i.test(txt) && p.parentNode) p.parentNode.removeChild(p);
-  }
-  zip.file('word/document.xml', new XMLSerializer().serializeToString(doc));
   return zip.generate({ type: 'arraybuffer' });
 }
 // Genera y guarda el par Excel + Word enlazado; devuelve los nombres
@@ -720,12 +670,9 @@ $('#btnExcel').onclick = async () => {
   try {
     const fl = estado.detir.header.fechaLiq;
     const mes = mesEs(parseInt(fl.m, 10));
-    const filas = [];   // una fila por recibo (la combinación hace una carta por fila)
-    for (const c of items) {
-      const email = emailsDe(c.info).trim();
-      for (const a of c.adeudos)
-        filas.push({ Nomfam: c.info.apellidos, NumFam: c.info.numFam, Concepto: conceptoCarta(a, mes), Marzo: Number(a.importe), Total: Number(a.importe), Email: email });
-    }
+    const filas = [];   // una fila por familia (la combinación hace una carta por fila; el Detalle ya agrupa sus recibos)
+    for (const c of items)
+      filas.push({ Nomfam: c.info.apellidos, NumFam: c.info.numFam, Detalle: detalleCarta(c.adeudos, mes, c.total), Total: Number(c.total), Email: emailsDe(c.info).trim() });
     const { nombreXlsx, nombreDoc } = await generarParCombinacion(filas, `Combinacion_devoluciones_${fl.y}${fl.m}${fl.d}`);
     await registrarEnvio('EMAIL', items.map(c => ({ numFam: c.info.numFam, apellidos: c.info.apellidos, importe: c.total, correos: emailsDe(c.info).trim() })));
     alerta('#estadoGenerar', 'ok',
@@ -755,7 +702,9 @@ $('#btnPrueba').onclick = async () => {
       const c = items[i % items.length] || null;
       const info = c ? c.info : { apellidos: `Prueba ${i + 1}`, numFam: 9000 + i };
       const imp = c ? c.total : 123.45;
-      return { Nomfam: info.apellidos, NumFam: info.numFam, Concepto: `${conceptoCarta(c && c.adeudos[0], mes)} (PRUEBA)`, Marzo: Number(imp), Total: Number(imp), Email: email };
+      const detalle = c ? detalleCarta(c.adeudos, mes, c.total)
+                        : `el recibo “Devolución enseñanza ${mes}” con fecha 01/${fl.m}/${fl.y} por importe ${fmtEuros(imp)} €`;
+      return { Nomfam: info.apellidos, NumFam: info.numFam, Detalle: `${detalle} (PRUEBA)`, Total: Number(imp), Email: email };
     });
     const { nombreDoc } = await generarParCombinacion(filas, `PRUEBA_combinacion_${fl.y}${fl.m}${fl.d}`);
     await registrarEnvio('PRUEBA', filas.map(f => ({ numFam: f.NumFam, apellidos: f.Nomfam, importe: f.Total, correos: f.Email })));
@@ -773,14 +722,11 @@ $('#btnPrueba').onclick = async () => {
 // Construye el .docx combinado y devuelve { blob, n }
 function construirWordCombinado(items) {
   const fl = estado.detir.header.fechaLiq;
-  const fechaCorta = `${fl.d}/${fl.m}/${fl.y}`;
   const mes = mesEs(parseInt(fl.m, 10));
   const cartas = items.map(c => ({
     nomfam: c.info.apellidos,
     numfam: c.info.numFam,
-    fechaCorta,
-    recibos: c.adeudos.map(a => ({ concepto: conceptoCarta(a, mes), importeFmt: fmtImporte(a.importe) })),
-    totalFmt: fmtImporte(c.total),
+    detalle: detalleCarta(c.adeudos, mes, c.total),
   }));
   const outXml = combinarDocumentXml(estado.plantillaXml, cartas);
   const zip = new PizZip(estado.plantillaZip.generate({ type: 'arraybuffer' }));  // copia limpia de la plantilla
