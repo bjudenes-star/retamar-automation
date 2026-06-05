@@ -135,6 +135,24 @@ const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio',
                'agosto','septiembre','octubre','noviembre','diciembre'];
 const mesEs = mm => MESES[mm - 1];
 
+// Series de facturación de Sage (catálogo "Series.xlsx", jun-2026): el concepto del DETIR lleva la
+// serie tras "Fra:" — p.ej. "Recibo Retamar Fra:EN 13289" → EN = Enseñanza, "Fra:TI 787" → Tienda.
+// IN y SF se omiten a propósito (nombres internos); esas caen al genérico.
+const SERIES = {
+  '22': 'Enseñanza', A: 'Factura serie A', A0: 'Previsiones de cobro refundidas',
+  AE: 'Actividad extraescolar', BI: 'Derecho examen Bach. Internacional', C: 'Abonos serie C',
+  CF: 'Curso Orientación Familiar', CO: 'Convivencia anual', CR: 'Curso refuerzo verano',
+  DE: 'Cobro deuda clientes', DJ: 'Ventas informáticas', EN: 'Enseñanza', ID: 'Idiomas',
+  LI: 'Libros enseñanza', R: 'Facturas rectificativas serie R', RA: 'Recibo anual',
+  RE: 'Factura rectificativa', SC: 'Asociación Padres Alumnos (APA)', TI: 'Tienda', VE: 'Summer Camp',
+};
+// "Devolución {serie} {mes}"; si la serie no se reconoce, genérico como antes.
+function conceptoCarta(adeudo, mes) {
+  const m = ((adeudo && adeudo.concepto) || '').match(/Fra:\s*([A-Z0-9]+)/i);
+  const nombre = m && SERIES[m[1].toUpperCase()];
+  return nombre ? `Devolución ${nombre} ${mes}` : `Devolución enseñanza ${mes}`;
+}
+
 function normNombre(s) {
   return (s || '')
     .normalize('NFD').replace(/[̀-ͯ]/g, '')   // quita tildes
@@ -706,7 +724,7 @@ $('#btnExcel').onclick = async () => {
     for (const c of items) {
       const email = emailsDe(c.info).trim();
       for (const a of c.adeudos)
-        filas.push({ Nomfam: c.info.apellidos, NumFam: c.info.numFam, Concepto: `Devolución enseñanza ${mes}`, Marzo: Number(a.importe), Total: Number(a.importe), Email: email });
+        filas.push({ Nomfam: c.info.apellidos, NumFam: c.info.numFam, Concepto: conceptoCarta(a, mes), Marzo: Number(a.importe), Total: Number(a.importe), Email: email });
     }
     const { nombreXlsx, nombreDoc } = await generarParCombinacion(filas, `Combinacion_devoluciones_${fl.y}${fl.m}${fl.d}`);
     await registrarEnvio('EMAIL', items.map(c => ({ numFam: c.info.numFam, apellidos: c.info.apellidos, importe: c.total, correos: emailsDe(c.info).trim() })));
@@ -737,7 +755,7 @@ $('#btnPrueba').onclick = async () => {
       const c = items[i % items.length] || null;
       const info = c ? c.info : { apellidos: `Prueba ${i + 1}`, numFam: 9000 + i };
       const imp = c ? c.total : 123.45;
-      return { Nomfam: info.apellidos, NumFam: info.numFam, Concepto: `Devolución enseñanza ${mes} (PRUEBA)`, Marzo: Number(imp), Total: Number(imp), Email: email };
+      return { Nomfam: info.apellidos, NumFam: info.numFam, Concepto: `${conceptoCarta(c && c.adeudos[0], mes)} (PRUEBA)`, Marzo: Number(imp), Total: Number(imp), Email: email };
     });
     const { nombreDoc } = await generarParCombinacion(filas, `PRUEBA_combinacion_${fl.y}${fl.m}${fl.d}`);
     await registrarEnvio('PRUEBA', filas.map(f => ({ numFam: f.NumFam, apellidos: f.Nomfam, importe: f.Total, correos: f.Email })));
@@ -761,7 +779,7 @@ function construirWordCombinado(items) {
     nomfam: c.info.apellidos,
     numfam: c.info.numFam,
     fechaCorta,
-    recibos: c.adeudos.map(a => ({ concepto: `Devolución enseñanza ${mes}`, importeFmt: fmtImporte(a.importe) })),
+    recibos: c.adeudos.map(a => ({ concepto: conceptoCarta(a, mes), importeFmt: fmtImporte(a.importe) })),
     totalFmt: fmtImporte(c.total),
   }));
   const outXml = combinarDocumentXml(estado.plantillaXml, cartas);
