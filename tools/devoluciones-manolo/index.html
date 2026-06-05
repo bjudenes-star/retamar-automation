@@ -160,7 +160,7 @@ const fmtVto = v => (v || '').replace(/-/g, '/');
 function detalleCarta(adeudos, mes, total) {
   if (adeudos.length === 1) {
     const a = adeudos[0];
-    return `el recibo “${conceptoCarta(a, mes)}” con fecha ${fmtVto(a.vto)} por importe ${fmtEuros(a.importe)} €`;
+    return `el “${conceptoCarta(a, mes)}” con fecha ${fmtVto(a.vto)} por importe ${fmtEuros(a.importe)} €`;
   }
   const partes = adeudos.map(a => `“${conceptoCarta(a, mes)}” — ${fmtVto(a.vto)} — ${fmtEuros(a.importe)} €`);
   return `los siguientes recibos: ${partes.join(' · ')} · TOTAL: ${fmtEuros(total)} €`;
@@ -703,7 +703,7 @@ $('#btnPrueba').onclick = async () => {
       const info = c ? c.info : { apellidos: `Prueba ${i + 1}`, numFam: 9000 + i };
       const imp = c ? c.total : 123.45;
       const detalle = c ? detalleCarta(c.adeudos, mes, c.total)
-                        : `el recibo “Devolución enseñanza ${mes}” con fecha 01/${fl.m}/${fl.y} por importe ${fmtEuros(imp)} €`;
+                        : `el “Devolución enseñanza ${mes}” con fecha 01/${fl.m}/${fl.y} por importe ${fmtEuros(imp)} €`;
       return { Nomfam: info.apellidos, NumFam: info.numFam, Detalle: `${detalle} (PRUEBA)`, Total: Number(imp), Email: email };
     });
     const { nombreDoc } = await generarParCombinacion(filas, `PRUEBA_combinacion_${fl.y}${fl.m}${fl.d}`);
