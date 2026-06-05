@@ -155,14 +155,15 @@ function serieCarta(adeudo) {
 const fmtEuros = n => { const [e0, d] = n.toFixed(2).split('.'); return e0.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + d; };
 const fmtVto = v => (v || '').replace(/-/g, '/');
 // Parte variable de la frase de la carta: "su banco ha devuelto «Detalle»."
-// Singular para un recibo; para varios, lista con el TOTAL al final.
-function detalleCarta(adeudos, mes, total) {
-  if (adeudos.length === 1) {
-    const a = adeudos[0];
-    return `el recibo de ${serieCarta(a)} de ${mes} con fecha ${fmtVto(a.vto)}, por importe de ${fmtEuros(a.importe)} €`;
-  }
-  const partes = adeudos.map(a => `${serieCarta(a)} de ${mes} — ${fmtVto(a.vto)} — ${fmtEuros(a.importe)} €`);
-  return `los siguientes recibos: ${partes.join(' · ')} · TOTAL: ${fmtEuros(total)} €`;
+// Un recibo: "el recibo de Enseñanza de junio con fecha ..., por importe de ... €"
+// Varios: "dos recibos: el de Enseñanza de junio con fecha ..., por importe de ... €, y el de Tienda de ..."
+const NUMS = ['dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve'];
+function detalleCarta(adeudos, mes) {
+  const parte = a => `de ${serieCarta(a)} de ${mes} con fecha ${fmtVto(a.vto)}, por importe de ${fmtEuros(a.importe)} €`;
+  if (adeudos.length === 1) return `el recibo ${parte(adeudos[0])}`;
+  const partes = adeudos.map(a => `el ${parte(a)}`);
+  const n = NUMS[adeudos.length - 2] || String(adeudos.length);
+  return `${n} recibos: ${partes.slice(0, -1).join('; ')}, y ${partes[partes.length - 1]}`;
 }
 
 function normNombre(s) {
@@ -671,7 +672,7 @@ $('#btnExcel').onclick = async () => {
     const mes = mesEs(parseInt(fl.m, 10));
     const filas = [];   // una fila por familia (la combinación hace una carta por fila; el Detalle ya agrupa sus recibos)
     for (const c of items)
-      filas.push({ Nomfam: c.info.apellidos, NumFam: c.info.numFam, Detalle: detalleCarta(c.adeudos, mes, c.total), Total: Number(c.total), Email: emailsDe(c.info).trim() });
+      filas.push({ Nomfam: c.info.apellidos, NumFam: c.info.numFam, Detalle: detalleCarta(c.adeudos, mes), Total: Number(c.total), Email: emailsDe(c.info).trim() });
     const { nombreXlsx, nombreDoc } = await generarParCombinacion(filas, `Combinacion_devoluciones_${fl.y}${fl.m}${fl.d}`);
     await registrarEnvio('EMAIL', items.map(c => ({ numFam: c.info.numFam, apellidos: c.info.apellidos, importe: c.total, correos: emailsDe(c.info).trim() })));
     alerta('#estadoGenerar', 'ok',
@@ -701,7 +702,7 @@ $('#btnPrueba').onclick = async () => {
       const c = items[i % items.length] || null;
       const info = c ? c.info : { apellidos: `Prueba ${i + 1}`, numFam: 9000 + i };
       const imp = c ? c.total : 123.45;
-      const detalle = c ? detalleCarta(c.adeudos, mes, c.total)
+      const detalle = c ? detalleCarta(c.adeudos, mes)
                         : `el recibo de enseñanza de ${mes} con fecha 01/${fl.m}/${fl.y}, por importe de ${fmtEuros(imp)} €`;
       return { Nomfam: info.apellidos, NumFam: info.numFam, Detalle: `${detalle} (PRUEBA)`, Total: Number(imp), Email: email };
     });
@@ -725,7 +726,7 @@ function construirWordCombinado(items) {
   const cartas = items.map(c => ({
     nomfam: c.info.apellidos,
     numfam: c.info.numFam,
-    detalle: detalleCarta(c.adeudos, mes, c.total),
+    detalle: detalleCarta(c.adeudos, mes),
   }));
   const outXml = combinarDocumentXml(estado.plantillaXml, cartas);
   const zip = new PizZip(estado.plantillaZip.generate({ type: 'arraybuffer' }));  // copia limpia de la plantilla
