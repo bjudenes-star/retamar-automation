@@ -142,7 +142,11 @@ function normNombre(s) {
     .replace(/[^A-Z0-9 ]/g, ' ')
     .replace(/\s+/g, ' ').trim();
 }
-const parseImporte = s => parseFloat(String(s).replace(/\./g, '').replace(',', '.'));
+// Formato antiguo "1.238,00" (coma decimal) y formato nuevo desde jun-2026 "1238.00" (punto decimal)
+const parseImporte = s => {
+  s = String(s).trim();
+  return s.includes(',') ? parseFloat(s.replace(/\./g, '').replace(',', '.')) : parseFloat(s);
+};
 function fmtImporte(n) {
   const [ent0, dec] = n.toFixed(2).split('.');
   const ent = ent0.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
@@ -163,19 +167,22 @@ function parseDetir(text) {
     const fl = l.match(/Fecha de liquidaci[oó]n:\s*(\d{2})-(\d{2})-(\d{4})/i);
     if (fl) header.fechaLiq = { d: fl[1], m: fl[2], y: fl[3] };
   }
-  const RE = /^(\S+)\s+(.+?)\s+(ES\d{2}(?:\s?\d{4}){5})\s+([\d.]+,\d{2})\s+(.+?)\s+(\d{2})-(\d{2})-(\d{4})\s+(.+?)\s+([0-9a-fA-F]{32})$/;
+  // Importe: "1.238,00" (antiguo) o "1238.00" (jun-2026). Vencimiento: DD-MM-AAAA (antiguo) o AAAA-MM-DD (jun-2026).
+  const RE = /^(\S+)\s+(.+?)\s+(ES\d{2}(?:\s?\d{4}){5})\s+(\d[\d.]*[.,]\d{2})\s+(.+?)\s+(\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})\s+(.+?)\s+([0-9a-fA-F]{32})$/;
   const adeudos = [];
   for (const l of lines) {
     const m = l.match(RE);
     if (!m) continue;
+    const f = m[6];   // vencimiento normalizado a DD-MM-AAAA
+    const vto = /^\d{4}/.test(f) ? `${f.slice(8, 10)}-${f.slice(5, 7)}-${f.slice(0, 4)}` : f;
     adeudos.push({
       ref: m[1], titular: m[2].trim(), iban: m[3], importe: parseImporte(m[4]),
-      concepto: m[5].trim(), vto: `${m[6]}-${m[7]}-${m[8]}`, motivo: m[9].trim(),
-      hash: m[10], familia: familiaDesdeRef(m[1]),
+      concepto: m[5].trim(), vto, motivo: m[7].trim(),
+      hash: m[8], familia: familiaDesdeRef(m[1]),
     });
   }
-  const tot = text.match(/IMPORTE TOTAL:\s*([\d.]+)\s*E\s*POR\s*(\d+)\s*ADEUDOS/i);
-  header.totalDeclarado = tot ? parseFloat(tot[1]) : null;
+  const tot = text.match(/IMPORTE TOTAL:\s*([\d.,]+)\s*[E€]\s*POR\s*(\d+)\s*ADEUDOS/i);
+  header.totalDeclarado = tot ? parseImporte(tot[1]) : null;
   header.nAdeudosDeclarado = tot ? parseInt(tot[2], 10) : null;
   return { header, adeudos };
 }
