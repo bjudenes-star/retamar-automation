@@ -635,7 +635,7 @@ function emailsDe(info) {
   const d = estado.destinatario && estado.destinatario[info.numFam];
   if (d === 'padre') return info.padre.email || '';
   if (d === 'madre') return info.madre.email || '';
-  return info.emails.join('; ');
+  return info.emails.join(', ');   // coma: Outlook la usa como separador de destinatarios en la combinación
 }
 // Celda "Destinatarios": selector padre/madre/ambos en familias especiales; texto en las normales.
 function celdaDestinatarios(c) {
@@ -647,7 +647,7 @@ function celdaDestinatarios(c) {
   return `<select class="dest" data-fam="${info.numFam}">
       ${opt('padre', 'Solo padre', info.padre.email)}
       ${opt('madre', 'Solo madre', info.madre.email)}
-      <option value="ambos"${sel === 'ambos' ? ' selected' : ''}>Ambos: ${esc(info.emails.join('; '))}</option>
+      <option value="ambos"${sel === 'ambos' ? ' selected' : ''}>Ambos: ${esc(info.emails.join(', '))}</option>
       <option value="manual"${sel === 'manual' ? ' selected' : ''}>✋ Manual — no enviar (lo manda Manolo)</option>
     </select>`;
 }
