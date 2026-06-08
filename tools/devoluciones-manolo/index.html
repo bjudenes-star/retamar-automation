@@ -628,15 +628,21 @@ function cartasParaGenerar() {
   const extra = resueltos().map(r => ({ info: r.asignado, adeudos: r.adeudos, total: r.total }));
   return base.concat(extra);
 }
-// Correo efectivo de una familia: el corregido a mano si lo hay; si no, según el destinatario elegido
-// (familias especiales: padre/madre/ambos); las normales reciben siempre a ambos progenitores.
-function emailsDe(info) {
-  if (estado.mailsEdit[info.numFam] != null) return estado.mailsEdit[info.numFam];
+// Correos destino de una familia (LISTA): el/los corregido(s) a mano si los hay; si no, según el
+// destinatario elegido (familias especiales: padre/madre/ambos); las normales, ambos progenitores.
+// La combinación de correspondencia NO admite varios destinatarios por carta, así que cada correo
+// va en su propia fila del Excel → Outlook manda un correo a cada uno (padre y madre por separado).
+function correosDe(info) {
+  if (estado.mailsEdit[info.numFam] != null)
+    return estado.mailsEdit[info.numFam].split(/[;,]+/).map(s => s.trim()).filter(Boolean);
   const d = estado.destinatario && estado.destinatario[info.numFam];
-  if (d === 'padre') return info.padre.email || '';
-  if (d === 'madre') return info.madre.email || '';
-  return info.emails.join(', ');   // coma: Outlook la usa como separador de destinatarios en la combinación
+  if (d === 'padre') return info.padre.email ? [info.padre.email] : [];
+  if (d === 'madre') return info.madre.email ? [info.madre.email] : [];
+  if (d === 'manual') return [];
+  return info.emails.slice();
 }
+// Versión texto (para avisos y registro de envíos)
+const emailsDe = info => correosDe(info).join(', ');
 // Celda "Destinatarios": selector padre/madre/ambos en familias especiales; texto en las normales.
 function celdaDestinatarios(c) {
   const info = c.familiaInfo;
@@ -741,13 +747,17 @@ $('#btnExcel').onclick = async () => {
   try {
     const fl = estado.detir.header.fechaLiq;
     const mes = mesEs(parseInt(fl.m, 10));
-    const filas = [];   // una fila por familia (la combinación hace una carta por fila; el Detalle ya agrupa sus recibos)
-    for (const c of items)
-      filas.push({ Nomfam: c.info.apellidos, NumFam: c.info.numFam, Detalle: detalleCarta(c.adeudos, mes), Total: Number(c.total), Email: emailsDe(c.info).trim() });
+    const filas = [];   // UNA FILA POR CORREO: si la familia tiene padre y madre, dos filas → dos correos
+    for (const c of items) {
+      const detalle = detalleCarta(c.adeudos, mes);
+      const correos = correosDe(c.info);
+      for (const email of (correos.length ? correos : ['']))
+        filas.push({ Nomfam: c.info.apellidos, NumFam: c.info.numFam, Detalle: detalle, Total: Number(c.total), Email: email });
+    }
     const { nombreXlsx, nombreDoc } = await generarParCombinacion(filas, `Combinacion_devoluciones_${fl.y}${fl.m}${fl.d}`);
     await registrarEnvio('EMAIL', items.map(c => ({ numFam: c.info.numFam, apellidos: c.info.apellidos, importe: c.total, correos: emailsDe(c.info).trim() })));
     alerta('#estadoGenerar', 'ok',
-      `✅ Generados en <code>${estado.dir.name}/Combinacion/</code> (${filas.length} fila(s), ${items.length} familias):<br>` +
+      `✅ Generados en <code>${estado.dir.name}/Combinacion/</code> (${filas.length} correo(s) a ${items.length} familias):<br>` +
       `• <code>${nombreXlsx}</code> — datos<br>• <code>${nombreDoc}</code> — Word ya enlazado<br>` +
       `<span class="muted">Abre el Word. Si Word te pide localizar el origen de datos, elige ese Excel (está al lado). Luego: Finalizar y combinar → Enviar mensajes de correo.</span>`);
   } catch (e) {
