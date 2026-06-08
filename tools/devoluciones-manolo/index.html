@@ -60,8 +60,16 @@
 </head>
 <body>
 <header>
-  <h1>Herramienta Correo Devoluciones</h1>
-  <p>Secretaría. Cruza el DETIR de CaixaBank con el padrón y genera las cartas en Word.</p>
+  <h1>Herramienta Correo Secretaría</h1>
+  <p>Secretaría. Cruza la fuente (banco o Sage) con el padrón y genera las cartas en Word.</p>
+  <p style="margin-top:10px">
+    <label style="font-size:.9rem;opacity:.95">¿Qué vas a hacer?
+      <select id="modoSel" style="font:inherit;margin-left:6px;padding:5px 8px;border-radius:6px;border:0">
+        <option value="devoluciones">Devoluciones de recibos (DETIR)</option>
+        <option value="conteo">Conteo de deuda fin de curso (balance Sage)</option>
+      </select>
+    </label>
+  </p>
 </header>
 <main>
   <div id="compat" class="alert err hidden">
@@ -85,8 +93,8 @@
 
   <!-- PASO 2 -->
   <section class="paso">
-    <h2><span class="num">2</span> Cargar el DETIR (PDF de devoluciones)</h2>
-    <div id="drop" class="off">Arrastra aquí el PDF del DETIR &nbsp;·&nbsp; o haz clic para elegirlo
+    <h2><span class="num">2</span> <span id="paso2Titulo">Cargar el DETIR (PDF de devoluciones)</span></h2>
+    <div id="drop" class="off"><span id="dropTxt">Arrastra aquí el PDF del DETIR &nbsp;·&nbsp; o haz clic para elegirlo</span>
       <input id="filePdf" type="file" accept="application/pdf" class="hidden">
     </div>
     <div id="estadoPdf"></div>
@@ -168,6 +176,79 @@ function detalleCarta(adeudos, mes) {
   const n = NUMS[adeudos.length - 2] || String(adeudos.length);
   return `${n} recibos: ${partes.slice(0, -1).join('; ')}, y ${partes[partes.length - 1]}`;
 }
+
+/* ============================================================
+   MODO CONTEO DE DEUDA — balance de sumas y saldos de Sage
+   ============================================================ */
+const IBAN_RETAMAR = 'ES68 0075 0280 9106 0002 2538';
+const dd = n => String(n).padStart(2, '0');
+const hoyDmy = () => { const d = new Date(); return `${dd(d.getDate())}/${dd(d.getMonth() + 1)}/${d.getFullYear()}`; };
+const hoyYmd = () => { const d = new Date(); return `${d.getFullYear()}${dd(d.getMonth() + 1)}${dd(d.getDate())}`; };
+// Importes del balance: vienen como número NATIVO de Excel; solo se parsea si llegara como texto.
+const numNativo = v => typeof v === 'number' ? v
+  : (parseFloat(String(v).replace(/[^\d,.-]/g, '').replace(/\.(?=\d{3}\b)/g, '').replace(',', '.')) || 0);
+// Cada cuenta 430xxxxx (8 dígitos) es una familia; tras "430" queda el nº de familia (igual que el DETIR).
+function familiaDeCuenta(cuenta) {
+  const s = String(cuenta).replace(/\D/g, '');
+  if (s.length !== 8 || !s.startsWith('430')) return null;
+  return parseInt(s.slice(3), 10);
+}
+// Devuelve la MISMA forma que parseDetir: { header, adeudos:[{ref, titular, importe, familia}] }.
+// Una "adeudo" por cuenta con saldo deudor (Periodo Saldo Debe > 0).
+function parseBalance(rows) {
+  const adeudos = [];
+  let totalCab = null;
+  for (const r of rows) {
+    if (String(r.Cuenta) === '430' && r['Tipo registro'] === 'Cabecera') totalCab = numNativo(r['Periodo Saldo Debe']);
+    if (r['Tipo registro'] !== 'Detalle') continue;
+    const saldo = numNativo(r['Periodo Saldo Debe']);
+    if (!(saldo > 0)) continue;
+    adeudos.push({ ref: String(r.Cuenta), titular: (r['Definición'] || '').trim(), importe: saldo, familia: familiaDeCuenta(r.Cuenta) });
+  }
+  return { header: { totalDeclarado: totalCab, nAdeudosDeclarado: adeudos.length }, adeudos };
+}
+// Cuerpo de la carta de conteo, con dos variantes según el saldo (1.000 € INCLUIDO en el tramo bajo).
+function detalleConteo(carta) {
+  const t = carta.total;
+  if (t <= 1000)
+    return `su saldo pendiente con el centro a final de curso es de ${fmtEuros(t)} €. Dado el importe, se le pasará un recibo en el mes de julio por dicha cantidad en la cuenta que tienen domiciliada; no tienen que hacer nada`;
+  return `su saldo pendiente a final de curso es de ${fmtEuros(t)} €. Les rogamos se pongan en contacto con secretaría para regularizar dicho importe; pueden hacerlo por transferencia a la cuenta de Retamar IBAN ${IBAN_RETAMAR}, indicando en el concepto «Ingreso familia ${carta.info.apellidos} (${carta.info.numFam})»`;
+}
+
+/* ============================================================
+   MODOS — lo único que difiere entre Devoluciones y Conteo de deuda
+   ============================================================ */
+const MODOS = {
+  devoluciones: {
+    etiqueta: 'Devoluciones de recibos',
+    paso2: { titulo: 'Cargar el DETIR (PDF de devoluciones)',
+             dropTxt: 'Arrastra aquí el PDF del DETIR &nbsp;·&nbsp; o haz clic para elegirlo',
+             accept: 'application/pdf', ext: /\.pdf$/i },
+    leerFuente: f => leerPdf(f),
+    plantillaKeyword: /devoluc/i,
+    mergefield: 'Detalle',
+    labelRecibos: 'Recibos',
+    construirDetalle: (carta, ctx) => detalleCarta(carta.adeudos, ctx.mes),
+    detalleEjemplo: ctx => `el recibo de enseñanza de ${ctx.mes} con fecha 01/${ctx.fl.m}/${ctx.fl.y}, por importe de 123,45 €`,
+    contexto: f => { const fl = f.header.fechaLiq; return { fl, mes: mesEs(parseInt(fl.m, 10)),
+             fechaTxt: `${fl.d}/${fl.m}/${fl.y}`, baseNombre: `Combinacion_devoluciones_${fl.y}${fl.m}${fl.d}` }; },
+    huella: f => { const h = f.header; return `devoluciones|${h.fechaLiq.d}/${h.fechaLiq.m}/${h.fechaLiq.y}|${h.totalDeclarado}|${f.adeudos.length}`; },
+  },
+  conteo: {
+    etiqueta: 'Conteo de deuda (fin de curso)',
+    paso2: { titulo: 'Cargar el balance de sumas y saldos (Excel de Sage)',
+             dropTxt: 'Arrastra aquí el balance (.xlsx) &nbsp;·&nbsp; o haz clic para elegirlo',
+             accept: '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ext: /\.xlsx$/i },
+    leerFuente: f => leerExcelBalance(f),
+    plantillaKeyword: /conteo|deuda|saldo/i,
+    mergefield: 'Detalle',
+    labelRecibos: 'Apuntes',
+    construirDetalle: carta => detalleConteo(carta),
+    detalleEjemplo: () => `su saldo pendiente con el centro a final de curso es de 123,45 €. Dado el importe, se le pasará un recibo en el mes de julio por dicha cantidad en la cuenta que tienen domiciliada; no tienen que hacer nada`,
+    contexto: () => ({ fechaTxt: hoyDmy(), baseNombre: `Conteo_deuda_${hoyYmd()}` }),
+    huella: f => `conteo|${hoyDmy()}|${f.header.totalDeclarado}|${f.adeudos.length}`,
+  },
+};
 
 function normNombre(s) {
   return (s || '')
@@ -443,7 +524,10 @@ async function idbGet(k) {
    ============================================================ */
 const $ = s => document.querySelector(s);
 const estado = { dir: null, padron: null, plantillaXml: null, plantillaZip: null,
-                 nombrePlantilla: null, nombrePadron: null, detir: null, cruce: null };
+                 nombrePlantilla: null, nombrePadron: null, fuente: null, cruce: null,
+                 modo: 'devoluciones', plantillas: {} };
+// Configuración del modo activo (devoluciones / conteo de deuda). Definida más abajo en MODOS.
+const M = () => MODOS[estado.modo];
 
 function alerta(sel, tipo, html) { $(sel).innerHTML = `<div class="alert ${tipo}">${html}</div>`; }
 function limpia(sel) { $(sel).innerHTML = ''; }
@@ -462,14 +546,18 @@ async function permisoRW(handle) {
 }
 
 async function cargarFicherosCarpeta() {
-  let xlsx = null, docx = null;
+  let padronH = null, xlsxFallback = null;
+  const docxs = [];
   for await (const [name, h] of estado.dir.entries()) {
     if (h.kind !== 'file' || name.startsWith('~$') || name.startsWith('.')) continue;
-    if (/\.xlsx$/i.test(name) && !xlsx) xlsx = h;
-    if (/\.docx$/i.test(name) && !docx) docx = h;
+    if (/\.xlsx$/i.test(name)) {
+      if (/vinculo|pga|padr[oó]n/i.test(name)) padronH = padronH || h;
+      else xlsxFallback = xlsxFallback || h;
+    }
+    if (/\.docx$/i.test(name)) docxs.push({ name, h });
   }
+  const xlsx = padronH || xlsxFallback;
   if (!xlsx) throw new Error('No encuentro el <b>padrón</b> (un fichero <code>.xlsx</code>) en la carpeta.');
-  if (!docx) throw new Error('No encuentro la <b>plantilla</b> de la carta (un fichero <code>.docx</code>) en la carpeta.');
 
   const wb = XLSX.read(await (await xlsx.getFile()).arrayBuffer(), { type: 'array' });
   const hoja = wb.Sheets['Hoja1'] || wb.Sheets[wb.SheetNames[0]];
@@ -479,11 +567,22 @@ async function cargarFicherosCarpeta() {
   estado.padron = buildPadron(rows);
   estado.nombrePadron = xlsx.name;
 
-  estado.plantillaZip = new PizZip(await (await docx.getFile()).arrayBuffer());
-  estado.plantillaXml = estado.plantillaZip.file('word/document.xml').asText();
-  if (!/MERGEFIELD\s+Detalle/i.test(estado.plantillaXml))
-    throw new Error(`La plantilla <code>${docx.name}</code> es la versión antigua (sin el campo <code>Detalle</code>). Sustitúyela por la plantilla actualizada de junio 2026.`);
-  estado.nombrePlantilla = docx.name;
+  // Clasificar todas las plantillas .docx por modo (palabra clave del nombre).
+  estado.plantillas = {};
+  const sinClasificar = [];
+  for (const d of docxs) {
+    const zip = new PizZip(await (await d.h.getFile()).arrayBuffer());
+    const entry = { zip, xml: zip.file('word/document.xml').asText(), nombre: d.name };
+    let asignado = false;
+    for (const [modo, cfg] of Object.entries(MODOS))
+      if (cfg.plantillaKeyword.test(d.name)) { if (!estado.plantillas[modo]) estado.plantillas[modo] = entry; asignado = true; break; }
+    if (!asignado) sinClasificar.push(entry);
+  }
+  // Fallback retrocompatible: un único .docx sin clasificar con campo Detalle → devoluciones
+  if (!estado.plantillas.devoluciones && sinClasificar.length === 1 && /MERGEFIELD\s+Detalle/i.test(sinClasificar[0].xml))
+    estado.plantillas.devoluciones = sinClasificar[0];
+  if (!Object.keys(estado.plantillas).length)
+    throw new Error('No encuentro ninguna <b>plantilla</b> de carta (un fichero <code>.docx</code>) en la carpeta.');
 }
 
 async function usarCarpeta(handle, recordar) {
@@ -498,12 +597,57 @@ async function usarCarpeta(handle, recordar) {
   if (recordar) await idbSet('workdir', handle);
   $('#btnCarpeta').classList.add('hidden');
   $('#btnCambiar').classList.remove('hidden');
+  const plantillasTxt = Object.entries(estado.plantillas).map(([modo, p]) => `${MODOS[modo].etiqueta}: <code>${esc(p.nombre)}</code>`).join(' · ');
   alerta('#estadoCarpeta', 'ok',
-    `Carpeta lista: <b>${handle.name}</b><br>` +
-    `Padrón: <code>${estado.nombrePadron}</code> · Plantilla: <code>${estado.nombrePlantilla}</code>`);
-  $('#drop').classList.remove('off');
-  if (estado.detir) procesarCruce();   // si ya había un DETIR cargado, recalcular
+    `Carpeta lista: <b>${esc(handle.name)}</b><br>Padrón: <code>${esc(estado.nombrePadron)}</code><br>Plantillas — ${plantillasTxt}`);
+  aplicarModo();
+  if (estado.fuente) procesarCruce();   // si ya había una fuente cargada, recalcular
 }
+
+// Repinta el Paso 2 (título, texto del drop y accept del input) según el modo.
+function pintarPaso2() {
+  const m = M();
+  $('#paso2Titulo').textContent = m.paso2.titulo;
+  $('#dropTxt').innerHTML = m.paso2.dropTxt;
+  filePdf.accept = m.paso2.accept;
+}
+// Aplica el modo activo: repinta el Paso 2, repunta la plantilla y valida.
+function aplicarModo() {
+  pintarPaso2();
+  const pl = estado.plantillas[estado.modo] || null;
+  estado.plantillaZip = pl ? pl.zip : null;
+  estado.plantillaXml = pl ? pl.xml : null;
+  estado.nombrePlantilla = pl ? pl.nombre : null;
+  validarPlantillaModo();
+}
+// Cambio de modo: resetea la fuente/resultados (no mezclar) y reaplica.
+function cambiarModo(modo) {
+  estado.modo = modo;
+  estado.fuente = null; estado.cruce = null;
+  filePdf.value = '';
+  $('#seccionResultados').classList.add('hidden');
+  $('#seccionGenerar').classList.add('hidden');
+  limpia('#estadoPdf'); $('#avisoDetir').innerHTML = '';
+  if (estado.dir) aplicarModo(); else pintarPaso2();
+}
+// Valida que exista plantilla del modo activo con el campo MERGEFIELD esperado; habilita/inhabilita el Paso 2.
+function validarPlantillaModo() {
+  const drop = $('#drop');
+  if (!estado.dir) { drop.classList.add('off'); return false; }
+  const pl = estado.plantillas[estado.modo];
+  if (!pl) {
+    alerta('#estadoPdf', 'warn', `No encuentro en la carpeta la plantilla de <b>${esc(M().etiqueta)}</b> (un <code>.docx</code>). Añádela para usar este modo.`);
+    drop.classList.add('off'); return false;
+  }
+  if (!new RegExp('MERGEFIELD\\s+' + M().mergefield, 'i').test(pl.xml)) {
+    alerta('#estadoPdf', 'err', `La plantilla <code>${esc(pl.nombre)}</code> no tiene el campo <code>${M().mergefield}</code>. Sustitúyela por la actualizada.`);
+    drop.classList.add('off'); return false;
+  }
+  limpia('#estadoPdf');
+  if (estado.padron) drop.classList.remove('off');
+  return true;
+}
+$('#modoSel').onchange = e => cambiarModo(e.target.value);
 
 $('#btnCarpeta').onclick = $('#btnCambiar').onclick = async () => {
   try {
@@ -526,16 +670,39 @@ $('#btnCarpeta').onclick = $('#btnCambiar').onclick = async () => {
   }
 })();
 
-// --- Carga del DETIR (PDF) ---
+// --- Carga de la fuente (PDF del DETIR o Excel del balance, según el modo) ---
 const drop = $('#drop'), filePdf = $('#filePdf');
 drop.onclick = () => filePdf.click();
-filePdf.onchange = () => filePdf.files[0] && leerPdf(filePdf.files[0]);
+filePdf.onchange = () => filePdf.files[0] && M().leerFuente(filePdf.files[0]);
 ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('hot'); }));
 ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('hot'); }));
 drop.addEventListener('drop', e => {
-  const f = [...e.dataTransfer.files].find(f => /\.pdf$/i.test(f.name));
-  if (f) leerPdf(f); else alerta('#estadoPdf', 'err', 'Arrastra un archivo PDF.');
+  const f = [...e.dataTransfer.files].find(f => M().ext.test(f.name));
+  if (f) M().leerFuente(f); else alerta('#estadoPdf', 'err', `Arrastra un archivo ${estado.modo === 'conteo' ? 'Excel (.xlsx)' : 'PDF'}.`);
 });
+
+// Lectura del balance de Sage (modo conteo): espejo de leerPdf, devuelve la misma forma { header, adeudos }.
+async function leerExcelBalance(file) {
+  alerta('#estadoPdf', 'info', `Leyendo <b>${file.name}</b>…`);
+  try {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    const hoja = wb.Sheets['Balance de sumas y saldos'] || wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(hoja, { defval: '' });
+    if (!rows.length || !('Periodo Saldo Debe' in rows[0]))
+      return alerta('#estadoPdf', 'err', 'Este Excel no parece un balance de sumas y saldos de Sage (falta la columna <code>Periodo Saldo Debe</code>). Revisa el archivo.');
+    const bal = parseBalance(rows);
+    if (!bal.adeudos.length)
+      return alerta('#estadoPdf', 'err', 'El balance no tiene ninguna cuenta con saldo deudor. Revisa el archivo.');
+    estado.fuente = bal;
+    const n = bal.adeudos.length, tot = bal.header.totalDeclarado;
+    const totTxt = tot != null ? ` · saldo deudor total (cabecera 430): <b>${fmtEuros(tot)} €</b>` : '';
+    alerta('#estadoPdf', 'ok', `Balance cargado: <b>${n} cuentas con deuda</b>${totTxt}.`);
+    if (estado.padron) procesarCruce();
+    else alerta('#estadoPdf', 'warn', 'Balance cargado. Elige primero la carpeta de trabajo (paso 1) para cruzarlo con el padrón.');
+  } catch (e) {
+    alerta('#estadoPdf', 'err', 'No pude leer el Excel: ' + e.message);
+  }
+}
 
 async function leerPdf(file) {
   alerta('#estadoPdf', 'info', `Leyendo <b>${file.name}</b>…`);
@@ -544,7 +711,7 @@ async function leerPdf(file) {
     const detir = parseDetir(text);
     if (!detir.adeudos.length)
       return alerta('#estadoPdf', 'err', 'Este PDF no parece un DETIR de CaixaBank (no encuentro adeudos). Revisa el archivo.');
-    estado.detir = detir;
+    estado.fuente = detir;
     const n = detir.adeudos.length, dec = detir.header.nAdeudosDeclarado;
     let aviso = '';
     if (dec && dec !== n) aviso = `<br><span class="alert warn" style="display:inline-block;margin-top:6px">⚠️ Leí ${n} adeudos pero el DETIR declara ${dec}. Revisa el resultado.</span>`;
@@ -560,7 +727,7 @@ const fechaCortaDe = d => `${d.header.fechaLiq.d}/${d.header.fechaLiq.m}/${d.hea
 
 // --- Cruce y render ---
 function procesarCruce() {
-  const cruce = cruzar(estado.detir, estado.padron);
+  const cruce = cruzar(estado.fuente, estado.padron);
   estado.cruce = cruce;
   estado.mailsEdit = {};   // correos corregidos a mano por nº de familia
   // Destinatario por familia especial: por defecto, el progenitor titular del recibo.
@@ -573,7 +740,7 @@ function procesarCruce() {
 
   $('#tablaCasan').innerHTML = casan.length ? `
     <h3 style="font-size:.95rem;margin:14px 0 4px">✅ Familias que reciben carta</h3>
-    <table><thead><tr><th>Nº fam.</th><th>Apellidos</th><th>Vía</th><th class="num">Recibos</th>
+    <table><thead><tr><th>Nº fam.</th><th>Apellidos</th><th>Vía</th><th class="num">${M().labelRecibos}</th>
       <th class="num">Total</th><th>Destinatarios</th></tr></thead><tbody>${
       casan.map(c => `<tr data-fam-row="${c.familiaInfo.numFam}">
         <td class="num">${c.familiaInfo.numFam}</td>
@@ -587,7 +754,7 @@ function procesarCruce() {
   $('#tablaRevisar').innerHTML = revisar.length ? `
     <h3 style="font-size:.95rem;margin:18px 0 4px">⚠️ A revisar</h3>
     <p class="muted" style="margin:0 0 6px">Si sabes el nº de familia (PGA), escríbelo: se comprueba al momento contra el padrón y, si existe y tiene correo, se incluye en las cartas.</p>
-    <table class="revisar"><thead><tr><th>Titular en el DETIR</th><th class="num">Importe</th><th>Motivo</th><th>Asignar nº familia</th></tr></thead><tbody>${
+    <table class="revisar"><thead><tr><th>Titular / cuenta</th><th class="num">Importe</th><th>Motivo</th><th>Asignar nº familia</th></tr></thead><tbody>${
       revisar.map((r, i) => `<tr data-row="${i}">
         <td>${esc(r.adeudos[0].titular)}</td>
         <td class="num">${fmtImporte(r.total)} €</td>
@@ -596,21 +763,21 @@ function procesarCruce() {
       </tr>`).join('')}</tbody></table>` : '';
 
   limpia('#estadoGenerar');
-  comprobarDetirProcesado();   // avisa si este DETIR ya se procesó antes
+  comprobarFuenteProcesada();   // avisa si esta fuente ya se procesó antes
 }
 
-// Avisa si el DETIR actual ya aparece en el registro como envío real (EMAIL o WORD)
-async function comprobarDetirProcesado() {
+// Avisa si la fuente actual ya aparece en el registro como envío real (EMAIL o WORD)
+async function comprobarFuenteProcesada() {
   const aviso = $('#avisoDetir');
   aviso.innerHTML = '';
   try {
     const fh = await estado.dir.getFileHandle('Registro_envios.csv');
-    const huella = huellaDetir();
+    const huella = M().huella(estado.fuente);
     const previos = (await (await fh.getFile()).text()).trim().split('\n').slice(1)
       .map(l => l.split(';')).filter(c => c[7] === huella && (c[2] === 'EMAIL' || c[2] === 'WORD'));
     if (previos.length) {
       const ult = previos[previos.length - 1];
-      aviso.innerHTML = `<div class="alert warn">⚠ <b>Este DETIR ya lo procesaste</b> (última vez: ${esc(ult[0])}, tipo <b>${esc(ult[2])}</b>). ` +
+      aviso.innerHTML = `<div class="alert warn">⚠ <b>Esto ya lo procesaste</b> (última vez: ${esc(ult[0])}, tipo <b>${esc(ult[2])}</b>). ` +
         `Revisa el registro de envíos antes de volver a generar para no duplicar.</div>`;
     }
   } catch (e) { /* no hay registro todavía: no se ha procesado nada */ }
@@ -745,16 +912,15 @@ $('#btnExcel').onclick = async () => {
   $('#btnExcel').disabled = true;
   alerta('#estadoGenerar', 'info', 'Generando el Excel y el Word de combinación…');
   try {
-    const fl = estado.detir.header.fechaLiq;
-    const mes = mesEs(parseInt(fl.m, 10));
+    const ctx = M().contexto(estado.fuente);
     const filas = [];   // UNA FILA POR CORREO: si la familia tiene padre y madre, dos filas → dos correos
     for (const c of items) {
-      const detalle = detalleCarta(c.adeudos, mes);
+      const detalle = M().construirDetalle({ adeudos: c.adeudos, total: c.total, info: c.info }, ctx);
       const correos = correosDe(c.info);
       for (const email of (correos.length ? correos : ['']))
         filas.push({ Nomfam: c.info.apellidos, NumFam: c.info.numFam, Detalle: detalle, Total: Number(c.total), Email: email });
     }
-    const { nombreXlsx, nombreDoc } = await generarParCombinacion(filas, `Combinacion_devoluciones_${fl.y}${fl.m}${fl.d}`);
+    const { nombreXlsx, nombreDoc } = await generarParCombinacion(filas, ctx.baseNombre);
     await registrarEnvio('EMAIL', items.map(c => ({ numFam: c.info.numFam, apellidos: c.info.apellidos, importe: c.total, correos: emailsDe(c.info).trim() })));
     alerta('#estadoGenerar', 'ok',
       `✅ Generados en <code>${estado.dir.name}/Combinacion/</code> (${filas.length} correo(s) a ${items.length} familias):<br>` +
@@ -771,23 +937,22 @@ $('#btnExcel').onclick = async () => {
 $('#btnPrueba').onclick = async () => {
   const correos = $('#correosPrueba').value.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
   if (!correos.length) { alerta('#estadoGenerar', 'warn', 'Escribe al menos un correo de prueba.'); return; }
-  if (!estado.detir) { alerta('#estadoGenerar', 'warn', 'Carga primero un DETIR para tener datos de ejemplo.'); return; }
+  if (!estado.fuente) { alerta('#estadoGenerar', 'warn', 'Carga primero la fuente (DETIR o balance) para tener datos de ejemplo.'); return; }
   $('#btnPrueba').disabled = true;
   alerta('#estadoGenerar', 'info', 'Generando la PRUEBA…');
   try {
-    const fl = estado.detir.header.fechaLiq;
-    const mes = mesEs(parseInt(fl.m, 10));
+    const ctx = M().contexto(estado.fuente);
     const items = cartasParaGenerar();
     // una fila por correo de prueba, con datos de una familia real (o de ejemplo si no hay)
     const filas = correos.map((email, i) => {
       const c = items[i % items.length] || null;
       const info = c ? c.info : { apellidos: `Prueba ${i + 1}`, numFam: 9000 + i };
       const imp = c ? c.total : 123.45;
-      const detalle = c ? detalleCarta(c.adeudos, mes)
-                        : `el recibo de enseñanza de ${mes} con fecha 01/${fl.m}/${fl.y}, por importe de ${fmtEuros(imp)} €`;
+      const detalle = c ? M().construirDetalle({ adeudos: c.adeudos, total: c.total, info: c.info }, ctx)
+                        : M().detalleEjemplo(ctx);
       return { Nomfam: info.apellidos, NumFam: info.numFam, Detalle: `${detalle} (PRUEBA)`, Total: Number(imp), Email: email };
     });
-    const { nombreDoc } = await generarParCombinacion(filas, `PRUEBA_combinacion_${fl.y}${fl.m}${fl.d}`);
+    const { nombreDoc } = await generarParCombinacion(filas, `PRUEBA_${ctx.baseNombre}`);
     await registrarEnvio('PRUEBA', filas.map(f => ({ numFam: f.NumFam, apellidos: f.Nomfam, importe: f.Total, correos: f.Email })));
     alerta('#estadoGenerar', 'ok',
       `🧪 PRUEBA con <b>${filas.length}</b> correo(s) generada en <code>${estado.dir.name}/Combinacion/</code>:<br>• <code>${nombreDoc}</code><br>` +
@@ -802,12 +967,11 @@ $('#btnPrueba').onclick = async () => {
 // --- Word combinado (documento único con todas las cartas) ---
 // Construye el .docx combinado y devuelve { blob, n }
 function construirWordCombinado(items) {
-  const fl = estado.detir.header.fechaLiq;
-  const mes = mesEs(parseInt(fl.m, 10));
+  const ctx = M().contexto(estado.fuente);
   const cartas = items.map(c => ({
     nomfam: c.info.apellidos,
     numfam: c.info.numFam,
-    detalle: detalleCarta(c.adeudos, mes),
+    detalle: M().construirDetalle({ adeudos: c.adeudos, total: c.total, info: c.info }, ctx),
   }));
   const outXml = combinarDocumentXml(estado.plantillaXml, cartas);
   const zip = new PizZip(estado.plantillaZip.generate({ type: 'arraybuffer' }));  // copia limpia de la plantilla
@@ -820,12 +984,7 @@ function construirWordCombinado(items) {
   return { blob: new Blob([zip.generate({ type: 'arraybuffer' })], { type: MIME_DOCX }), n: cartas.length };
 }
 // --- Registro de envíos (CSV persistente en la carpeta de trabajo) ---
-const CABECERA_REG = 'FechaHora;FechaDETIR;Tipo;NumFamilia;Apellidos;Importe;Correos;DetirID';
-// Huella del DETIR para detectar si ya se procesó (fecha + importe total + nº de recibos)
-function huellaDetir() {
-  const h = estado.detir.header;
-  return `${h.fechaLiq.d}/${h.fechaLiq.m}/${h.fechaLiq.y}|${h.totalDeclarado}|${estado.detir.adeudos.length}`;
-}
+const CABECERA_REG = 'FechaHora;FechaFuente;Tipo;NumFamilia;Apellidos;Importe;Correos;FuenteID';
 const dosDig = n => String(n).padStart(2, '0');
 function ahoraTexto() {
   const d = new Date();
@@ -834,15 +993,14 @@ function ahoraTexto() {
 const celdaCsv = v => { const s = String(v ?? '').replace(/;/g, ' /'); return /[\n"]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 // regs: [{ numFam, apellidos, importe, correos }]
 async function registrarEnvio(tipo, regs) {
-  const fl = estado.detir.header.fechaLiq;
-  const fechaDetir = `${fl.d}/${fl.m}/${fl.y}`;
+  const ctx = M().contexto(estado.fuente);
   const stamp = ahoraTexto();
   const fh = await estado.dir.getFileHandle('Registro_envios.csv', { create: true });
   let texto = (await (await fh.getFile()).text()).trim();
   if (!texto) texto = CABECERA_REG;
-  const id = huellaDetir();
+  const id = M().huella(estado.fuente);
   for (const r of regs)
-    texto += '\n' + [stamp, fechaDetir, tipo, r.numFam, r.apellidos, fmtImporte(r.importe), r.correos, id].map(celdaCsv).join(';');
+    texto += '\n' + [stamp, ctx.fechaTxt, tipo, r.numFam, r.apellidos, fmtImporte(r.importe), r.correos, id].map(celdaCsv).join(';');
   const w = await fh.createWritable();
   await w.write(texto + '\n');
   await w.close();
