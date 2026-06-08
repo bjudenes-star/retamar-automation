@@ -35,6 +35,9 @@
   .badge { font-size:.72rem; padding:2px 7px; border-radius:20px; font-weight:600; }
   .b-cod { background:#e4eefb; color:var(--azul); }
   .b-nom { background:#eaf6ec; color:var(--verde); }
+  .b-esp { background:#f3e8fb; color:#6b21a8; margin-left:6px; }
+  select.dest { font:inherit; padding:5px 8px; border:1px solid var(--bd); border-radius:6px; max-width:100%; }
+  tr.manual td { background:#faf6ff; }
   .alert { border-radius:8px; padding:11px 14px; margin:10px 0; font-size:.9rem; }
   .alert.err { background:#fde8ea; color:var(--rojo); border:1px solid #f3c2c8; }
   .alert.warn { background:#fcf6e3; color:var(--ambr); border:1px solid #eadfae; }
@@ -228,8 +231,13 @@ function buildPadron(rows) {
     if (!Number.isFinite(fam)) continue;
     if (!porFamilia.has(fam)) porFamilia.set(fam, {
       numFam: fam, apellidos: (r.APELLIDOS || '').trim(), emails: [],
+      padre: { nombre: '', email: '' }, madre: { nombre: '', email: '' },
     });
     const f = porFamilia.get(fam);
+    if (!f.padre.nombre) f.padre.nombre = (r.NOMBRE_PADRE || '').trim();
+    if (!f.padre.email) f.padre.email = (r.EMAIL_PADRE || '').trim();
+    if (!f.madre.nombre) f.madre.nombre = (r.NOMBRE_MADRE || '').trim();
+    if (!f.madre.email) f.madre.email = (r.EMAIL_MADRE || '').trim();
     for (const e of [r.EMAIL_PADRE, r.EMAIL_MADRE]) {
       const em = (e || '').trim();
       if (em && !f.emails.includes(em)) f.emails.push(em);
@@ -244,14 +252,34 @@ function buildPadron(rows) {
   return { porFamilia, porNombre };
 }
 
+// Familias "especiales": Manolo les pone un 9 delante en Sage (familias separadas, etc.) para que
+// solo se escriba a uno de los dos progenitores. El nº real lleva un 1 en vez del 9: 90343 → 10343.
+function familiaEspecialDe(n) {
+  const s = String(n);
+  return (s.length === 5 && s[0] === '9') ? parseInt('1' + s.slice(1), 10) : null;
+}
+// Cuál progenitor es el titular del recibo (por nombre): el que más palabras comparte con el del DETIR.
+function progenitorTitular(familiaInfo, titularDetir) {
+  const t = new Set(normNombre(titularDetir).split(' ').filter(Boolean));
+  const score = nombre => normNombre(nombre).split(' ').filter(Boolean).filter(w => t.has(w)).length;
+  const sp = score(familiaInfo.padre.nombre), sm = score(familiaInfo.madre.nombre);
+  if (sp === 0 && sm === 0) return familiaInfo.padre.email ? 'padre' : 'madre';
+  return sp >= sm ? 'padre' : 'madre';
+}
+
 function cruzar(detir, padron) {
   const grupos = new Map();
   for (const a of detir.adeudos) {
-    let familiaInfo = null, via = null, motivoRevisar = null;
+    let familiaInfo = null, via = null, motivoRevisar = null, especial = false;
     if (a.familia != null) {
       familiaInfo = padron.porFamilia.get(a.familia) || null;
       if (familiaInfo) via = 'codigo';
-      else motivoRevisar = `Código ${a.familia} no está en el padrón`;
+      else {
+        const alt = familiaEspecialDe(a.familia);
+        const altInfo = alt != null ? padron.porFamilia.get(alt) : null;
+        if (altInfo) { familiaInfo = altInfo; via = 'codigo'; especial = true; }
+        else motivoRevisar = `Código ${a.familia} no está en el padrón`;
+      }
     } else {
       const key = normNombre(a.titular);
       const cand = padron.porNombre.get(key);
@@ -260,7 +288,7 @@ function cruzar(detir, padron) {
       else motivoRevisar = `Referencia sin código y titular "${a.titular}" no está en el padrón`;
     }
     const clave = familiaInfo ? `F${familiaInfo.numFam}` : `R${a.ref}`;
-    if (!grupos.has(clave)) grupos.set(clave, { adeudos: [], familiaInfo, via, motivoRevisar });
+    if (!grupos.has(clave)) grupos.set(clave, { adeudos: [], familiaInfo, via, motivoRevisar, especial });
     grupos.get(clave).adeudos.push(a);
   }
   const casan = [], revisar = [];
@@ -535,6 +563,10 @@ function procesarCruce() {
   const cruce = cruzar(estado.detir, estado.padron);
   estado.cruce = cruce;
   estado.mailsEdit = {};   // correos corregidos a mano por nº de familia
+  // Destinatario por familia especial: por defecto, el progenitor titular del recibo.
+  estado.destinatario = {};
+  for (const c of cruce.casan)
+    if (c.especial) estado.destinatario[c.familiaInfo.numFam] = progenitorTitular(c.familiaInfo, c.adeudos[0].titular);
   const { casan, revisar } = cruce;
   $('#seccionResultados').classList.remove('hidden');
   renderResumen();
@@ -543,13 +575,13 @@ function procesarCruce() {
     <h3 style="font-size:.95rem;margin:14px 0 4px">✅ Familias que reciben carta</h3>
     <table><thead><tr><th>Nº fam.</th><th>Apellidos</th><th>Vía</th><th class="num">Recibos</th>
       <th class="num">Total</th><th>Destinatarios</th></tr></thead><tbody>${
-      casan.map(c => `<tr>
+      casan.map(c => `<tr data-fam-row="${c.familiaInfo.numFam}">
         <td class="num">${c.familiaInfo.numFam}</td>
-        <td>${esc(c.familiaInfo.apellidos)}</td>
+        <td>${esc(c.familiaInfo.apellidos)}${c.especial ? ' <span class="badge b-esp" title="Familia marcada con 9 en Sage: solo se escribe a uno de los dos">especial</span>' : ''}</td>
         <td><span class="badge ${c.via === 'codigo' ? 'b-cod' : 'b-nom'}">${c.via === 'codigo' ? 'código' : 'nombre'}</span></td>
         <td class="num">${c.adeudos.length}</td>
         <td class="num">${fmtImporte(c.total)} €</td>
-        <td class="muted">${c.familiaInfo.emails.map(esc).join('<br>')}</td>
+        <td class="muted">${celdaDestinatarios(c)}</td>
       </tr>`).join('')}</tbody></table>` : '';
 
   $('#tablaRevisar').innerHTML = revisar.length ? `
@@ -586,23 +618,56 @@ async function comprobarDetirProcesado() {
 
 // Familias resueltas a mano en la tabla "A revisar"
 const resueltos = () => estado.cruce ? estado.cruce.revisar.filter(r => r.asignado) : [];
-// Lo que se generará: las que casaron + las asignadas a mano
+// Familias especiales marcadas como "manual": no se envían, las manda Manolo a mano
+const esManual = numFam => estado.destinatario && estado.destinatario[numFam] === 'manual';
+// Lo que se generará: las que casaron (salvo las marcadas como manuales) + las asignadas a mano
 function cartasParaGenerar() {
-  const base = estado.cruce.casan.map(c => ({ info: c.familiaInfo, adeudos: c.adeudos, total: c.total }));
+  const base = estado.cruce.casan
+    .filter(c => !esManual(c.familiaInfo.numFam))
+    .map(c => ({ info: c.familiaInfo, adeudos: c.adeudos, total: c.total }));
   const extra = resueltos().map(r => ({ info: r.asignado, adeudos: r.adeudos, total: r.total }));
   return base.concat(extra);
 }
-// Correo efectivo de una familia: el corregido a mano si lo hay, si no el del padrón
-const emailsDe = info => (estado.mailsEdit[info.numFam] ?? info.emails.join('; '));
+// Correo efectivo de una familia: el corregido a mano si lo hay; si no, según el destinatario elegido
+// (familias especiales: padre/madre/ambos); las normales reciben siempre a ambos progenitores.
+function emailsDe(info) {
+  if (estado.mailsEdit[info.numFam] != null) return estado.mailsEdit[info.numFam];
+  const d = estado.destinatario && estado.destinatario[info.numFam];
+  if (d === 'padre') return info.padre.email || '';
+  if (d === 'madre') return info.madre.email || '';
+  return info.emails.join('; ');
+}
+// Celda "Destinatarios": selector padre/madre/ambos en familias especiales; texto en las normales.
+function celdaDestinatarios(c) {
+  const info = c.familiaInfo;
+  if (!c.especial) return info.emails.map(esc).join('<br>');
+  const sel = estado.destinatario[info.numFam];
+  const opt = (val, etiqueta, email) =>
+    `<option value="${val}"${sel === val ? ' selected' : ''}${val !== 'ambos' && !email ? ' disabled' : ''}>${esc(etiqueta)}${email ? ': ' + esc(email) : ' (sin correo)'}</option>`;
+  return `<select class="dest" data-fam="${info.numFam}">
+      ${opt('padre', 'Solo padre', info.padre.email)}
+      ${opt('madre', 'Solo madre', info.madre.email)}
+      <option value="ambos"${sel === 'ambos' ? ' selected' : ''}>Ambos: ${esc(info.emails.join('; '))}</option>
+      <option value="manual"${sel === 'manual' ? ' selected' : ''}>✋ Manual — no enviar (lo manda Manolo)</option>
+    </select>`;
+}
 function renderResumen() {
   const { casan, revisar } = estado.cruce;
   const res = resueltos();
-  const totalCartas = casan.length + res.length;
-  const recibos = casan.reduce((s, c) => s + c.adeudos.length, 0) + res.reduce((s, r) => s + r.adeudos.length, 0);
+  const manuales = casan.filter(c => esManual(c.familiaInfo.numFam));
+  const casanEnvio = casan.filter(c => !esManual(c.familiaInfo.numFam));
+  const totalCartas = casanEnvio.length + res.length;
+  const recibos = casanEnvio.reduce((s, c) => s + c.adeudos.length, 0) + res.reduce((s, r) => s + r.adeudos.length, 0);
   $('#resumen').innerHTML =
     `<div class="stat"><b>${totalCartas}</b> familias con carta</div>` +
     `<div class="stat"><b>${revisar.length - res.length}</b> a revisar a mano</div>` +
+    (manuales.length ? `<div class="stat"><b>${manuales.length}</b> manuales (las manda Manolo)</div>` : '') +
     `<div class="stat"><b>${recibos}</b> recibos casados</div>`;
+  // Marca visualmente las filas puestas en "manual"
+  for (const c of casan) {
+    const fila = $(`tr[data-fam-row="${c.familiaInfo.numFam}"]`);
+    if (fila) fila.classList.toggle('manual', esManual(c.familiaInfo.numFam));
+  }
   $('#seccionGenerar').classList.toggle('hidden', totalCartas === 0);
 }
 // Comprobación en el momento del nº de familia que teclea Manolo
@@ -629,6 +694,12 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;',
 $('#tablaRevisar').addEventListener('input', e => {
   const inp = e.target.closest('input.asig');
   if (inp) asignarRevisar(+inp.dataset.i, inp.value);
+});
+
+// Cambio de destinatario en familias especiales (solo padre / solo madre / ambos)
+$('#tablaCasan').addEventListener('change', e => {
+  const sel = e.target.closest('select.dest');
+  if (sel) { estado.destinatario[+sel.dataset.fam] = sel.value; renderResumen(); }
 });
 
 // --- Generación del Excel + Word para la combinación de correspondencia ---
