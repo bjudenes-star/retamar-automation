@@ -725,6 +725,14 @@ async function leerPdf(file) {
 
 const fechaCortaDe = d => `${d.header.fechaLiq.d}/${d.header.fechaLiq.m}/${d.header.fechaLiq.y}`;
 
+// Distingue una cuenta que NO es familia (empresa, asociación, cuenta colectiva de tienda) de una
+// persona (ex-alumno cuyo nº de familia ya no está en el padrón, que SÍ se puede asignar a mano).
+function esEntidad(titular) {
+  const t = (titular || '').trim();
+  return /\bS\.?\s?[LA]\.?(\s?[UL]\.?)?\s*$/i.test(t)             // termina en SL / SA / SLU / SLL
+      || /\b(GROUP|ASOC|FEDER|TIENDA|TARJETA|CLIENTES)\b/i.test(t);
+}
+
 // --- Cruce y render ---
 function procesarCruce() {
   const cruce = cruzar(estado.fuente, estado.padron);
@@ -751,16 +759,28 @@ function procesarCruce() {
         <td class="muted">${celdaDestinatarios(c)}</td>
       </tr>`).join('')}</tbody></table>` : '';
 
-  $('#tablaRevisar').innerHTML = revisar.length ? `
-    <h3 style="font-size:.95rem;margin:18px 0 4px">⚠️ A revisar</h3>
-    <p class="muted" style="margin:0 0 6px">Si sabes el nº de familia (PGA), escríbelo: se comprueba al momento contra el padrón y, si existe y tiene correo, se incluye en las cartas.</p>
-    <table class="revisar"><thead><tr><th>Titular / cuenta</th><th class="num">Importe</th><th>Motivo</th><th>Asignar nº familia</th></tr></thead><tbody>${
-      revisar.map((r, i) => `<tr data-row="${i}">
+  // "A revisar" en dos bloques: personas (ex-familias, asignables a un nº PGA) y entidades
+  // (empresas, asociaciones, cuenta colectiva de tienda) que normalmente no son familias.
+  // Se conserva el índice ORIGINAL en `revisar` (data-row / data-i) para que la asignación a mano siga funcionando.
+  const filaRevisar = (r, i) => `<tr data-row="${i}">
         <td>${esc(r.adeudos[0].titular)}</td>
         <td class="num">${fmtImporte(r.total)} €</td>
         <td>${esc(r.motivo)}</td>
         <td><input class="asig" data-i="${i}" type="text" inputmode="numeric" placeholder="nº familia PGA"><span class="asig-fb muted" data-fb="${i}"></span></td>
-      </tr>`).join('')}</tbody></table>` : '';
+      </tr>`;
+  const conIdx = revisar.map((r, i) => ({ r, i }));
+  const entidades = conIdx.filter(x => esEntidad(x.r.adeudos[0].titular));
+  const personas = conIdx.filter(x => !esEntidad(x.r.adeudos[0].titular));
+  const tablaRev = (lista, ayuda) => `
+    <p class="muted" style="margin:0 0 6px">${ayuda}</p>
+    <table class="revisar"><thead><tr><th>Titular / cuenta</th><th class="num">Importe</th><th>Motivo</th><th>Asignar nº familia</th></tr></thead><tbody>${
+      lista.map(x => filaRevisar(x.r, x.i)).join('')}</tbody></table>`;
+  $('#tablaRevisar').innerHTML = revisar.length ? `
+    <h3 style="font-size:.95rem;margin:18px 0 4px">⚠️ A revisar</h3>
+    ${personas.length ? `<h4 style="font-size:.9rem;margin:10px 0 2px">Personas (${personas.length})</h4>` +
+      tablaRev(personas, 'Suelen ser antiguos alumnos cuyo nº de familia ya no está en el padrón. Si sabes el nº de familia (PGA), escríbelo: se comprueba al momento contra el padrón y, si existe y tiene correo, se incluye en las cartas.') : ''}
+    ${entidades.length ? `<h4 style="font-size:.9rem;margin:14px 0 2px">Empresas / entidades (${entidades.length})</h4>` +
+      tablaRev(entidades, 'Empresas, asociaciones o la cuenta colectiva de tienda: <b>no son familias</b> y normalmente no reciben carta. Las gestiona Manolo aparte (salvo que sepas un nº de familia que aplique).') : ''}` : '';
 
   limpia('#estadoGenerar');
   comprobarFuenteProcesada();   // avisa si esta fuente ya se procesó antes
