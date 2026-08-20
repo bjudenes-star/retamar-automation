@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repaso de facturas</title>
+<style>
+  :root{
+    --azul:#1B2B6B; --azul-claro:#e8ebf6; --tinta:#1c2030; --gris:#5c6270;
+    --fondo:#f6f6f4; --panel:#ffffff; --borde:#d9dbe2;
+    --ok:#1e7a46; --ambar:#8a6100; --ambar-f:#fff6df; --rojo:#a33;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.45 -apple-system,"Helvetica Neue",Arial,sans-serif;color:var(--tinta);background:var(--fondo);height:100vh;display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:16px;padding:10px 18px;background:var(--azul);color:#fff}
+  header h1{font-size:15px;font-weight:600;margin:0;letter-spacing:.02em}
+  header .contador{font-size:13px;opacity:.85}
+  header .sep{flex:1}
+  button{font:inherit;border:1px solid var(--borde);border-radius:6px;padding:7px 14px;background:#fff;color:var(--tinta);cursor:pointer}
+  button:hover{filter:brightness(.97)}
+  button:disabled{opacity:.45;cursor:default}
+  .btn-header{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.35);color:#fff}
+  main{flex:1;display:flex;min-height:0}
+  #pdfzona{flex:3;display:flex;flex-direction:column;border-right:1px solid var(--borde);background:#525659}
+  #pestanas{display:flex;gap:6px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--borde);align-items:center}
+  #pestanas button.activa{background:var(--azul-claro);border-color:var(--azul)}
+  #visor{flex:1;border:0;width:100%}
+  #panel{flex:2;display:flex;flex-direction:column;min-width:430px;background:var(--panel)}
+  #correo{padding:12px 16px;border-bottom:1px solid var(--borde)}
+  #correo .rem{font-weight:600}
+  #correo .asu{color:var(--gris)}
+  #avisos{padding:0 16px}
+  .aviso{background:var(--ambar-f);color:var(--ambar);border:1px solid #e7d49a;border-radius:6px;padding:6px 10px;margin:8px 0;font-size:13px}
+  .aviso.rojo{background:#fdeeee;color:var(--rojo);border-color:#e6bcbc}
+  #formulario{flex:1;overflow-y:auto;padding:10px 16px 4px}
+  .campo{display:grid;grid-template-columns:130px 1fr;align-items:center;gap:8px;margin:4px 0}
+  .campo label{color:var(--gris);font-size:12.5px;text-align:right}
+  .campo input{font:inherit;padding:5px 8px;border:1px solid var(--borde);border-radius:5px;width:100%}
+  .campo input:focus{outline:2px solid var(--azul-claro);border-color:var(--azul)}
+  .campo input.tocado{background:#f2f7f2;border-color:var(--ok)}
+  .campo input.vacio-esperado{background:#fafafa}
+  footer{display:flex;gap:10px;padding:12px 16px;border-top:1px solid var(--borde);background:var(--panel)}
+  #aprobar{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600;flex:1}
+  #nofactura{color:var(--rojo)}
+  #vacio{margin:auto;text-align:center;color:var(--gris)}
+  #vacio h2{color:var(--tinta);font-weight:600}
+  .atajo{opacity:.6;font-size:11.5px;margin-left:6px}
+  #estadoLinea{padding:4px 16px;font-size:12px;color:var(--gris);border-top:1px solid var(--borde);background:var(--fondo)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Repaso de facturas</h1>
+  <span class="contador" id="contador">—</span>
+  <span class="sep"></span>
+  <button class="btn-header" id="btnCopiar">Copiar aprobadas <span id="nCopiar"></span></button>
+  <button class="btn-header" id="btnRefrescar">Buscar correos nuevos</button>
+</header>
+<main>
+  <section id="pdfzona">
+    <div id="pestanas"></div>
+    <iframe id="visor" title="factura"></iframe>
+  </section>
+  <section id="panel">
+    <div id="correo"></div>
+    <div id="avisos"></div>
+    <div id="formulario"></div>
+    <footer id="botones">
+      <button id="aprobar">Aprobar <span class="atajo">⏎</span></button>
+      <button id="saltar">Saltar <span class="atajo">S</span></button>
+      <button id="nofactura">No es factura</button>
+    </footer>
+    <div id="estadoLinea"></div>
+  </section>
+</main>
+<script>
+const CAMPOS=['Mes','Fecha','Factura','Número fact.','Importe','Vencim.','Código','Empresa','Verificado','Área','Encargado','Concepto','Contabilidad','Forma de pago','Pagado','IVA','Cuenta de gasto'];
+const VACIOS_OK=['Verificado','Concepto','Pagado'];   // van en blanco a propósito
+let cola=[],idx=0,actual=null;
+
+const $=s=>document.querySelector(s);
+async function api(ruta,body){
+  const r=await fetch(ruta,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{});
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error||r.status);}
+  return r.headers.get('content-type')?.includes('json')?r.json():r.text();
+}
+function estado(msg){$('#estadoLinea').textContent=msg||''}
+
+async function cargarCola(){
+  const d=await api('/api/cola');
+  cola=d.pendientes;idx=0;
+  $('#contador').textContent=cola.length?`${cola.length} pendientes · ${d.hechasHoy} cerradas hoy`:`todo al día · ${d.hechasHoy} cerradas hoy`;
+  $('#nCopiar').textContent=d.aprobadasSinPegar?`(${d.aprobadasSinPegar})`:'';
+  pintar();
+}
+function pintar(){
+  actual=cola[idx];
+  const form=$('#formulario'),avisos=$('#avisos'),pest=$('#pestanas'),correo=$('#correo');
+  if(!actual){
+    form.innerHTML='';avisos.innerHTML='';pest.innerHTML='';correo.innerHTML='';
+    $('#visor').removeAttribute('src');
+    form.innerHTML='<div id="vacio"><h2>No queda nada en la cola</h2><p>Pulsa «Buscar correos nuevos» para volver a mirar el buzón.</p></div>';
+    for(const b of ['aprobar','saltar','nofactura'])$('#'+b).disabled=true;
+    return;
+  }
+  for(const b of ['aprobar','saltar','nofactura'])$('#'+b).disabled=false;
+  correo.innerHTML=`<div class="rem">${esc(actual.remitente)}</div><div class="asu">${esc(actual.asunto)} · ${actual.fechaCorreo}</div>`;
+  // avisos
+  avisos.innerHTML='';
+  if(actual.confianza==='no_factura')avisos.innerHTML+=aviso('No parece una factura (ficha, albarán, lista…). Decide tú.', true);
+  if(actual.confianza==='sin_texto')avisos.innerHTML+=aviso('PDF escaneado sin texto: rellena mirando el documento.');
+  if(actual.confianza==='sin_pdf')avisos.innerHTML+=aviso('El adjunto no se pudo descargar — usa «Abrir en Mail» y rellena a mano.', true);
+  for(const p of actual.problemas||[])avisos.innerHTML+=aviso(p);
+  // pestañas de PDFs
+  pest.innerHTML='';
+  (actual.adjuntos||[]).forEach((a,i)=>{
+    const b=document.createElement('button');
+    b.textContent=a.replace(/^[0-9a-f]{8}_m?\d+_/,'');
+    b.onclick=()=>{verPdf(a);[...pest.children].forEach(x=>x.classList.remove('activa'));b.classList.add('activa');};
+    if(i===0)b.classList.add('activa');
+    pest.appendChild(b);
+  });
+  const abrir=document.createElement('button');
+  abrir.textContent=actual.adjuntos&&actual.adjuntos.length?'Vista Previa':'Abrir en Mail';
+  abrir.onclick=()=>api('/api/abrir',{id:actual.id,archivo:actual.adjuntos&&actual.adjuntos[0]});
+  pest.appendChild(abrir);
+  if(actual.adjuntos&&actual.adjuntos.length)verPdf(actual.adjuntos[0]);
+  else $('#visor').removeAttribute('src');
+  // formulario
+  form.innerHTML='';
+  const prop=actual.propuesta||{};
+  for(const c of CAMPOS){
+    const div=document.createElement('div');div.className='campo';
+    const inp=document.createElement('input');
+    inp.value=prop[c]??'';inp.dataset.campo=c;
+    if(VACIOS_OK.includes(c))inp.classList.add('vacio-esperado');
+    inp.addEventListener('input',()=>inp.classList.toggle('tocado',inp.value!==(prop[c]??'')));
+    div.innerHTML=`<label>${c}</label>`;div.appendChild(inp);
+    form.appendChild(div);
+  }
+  estado(`Correo ${idx+1} de ${cola.length} · confianza: ${actual.confianza}`);
+}
+const verPdf=a=>$('#visor').src='/pdf/'+encodeURIComponent(a);
+const aviso=(t,rojo)=>`<div class="aviso${rojo?' rojo':''}">${esc(t)}</div>`;
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function filaDelFormulario(){
+  const fila={};
+  document.querySelectorAll('#formulario input').forEach(i=>fila[i.dataset.campo]=i.value.trim());
+  return fila;
+}
+async function decidir(accion,extra){
+  if(!actual)return;
+  const body={id:actual.id,accion,...extra};
+  if(accion==='aprobar')body.fila=filaDelFormulario();
+  try{
+    estado('guardando…');
+    const r=await api('/api/decision',body);
+    cola.splice(idx,1);if(idx>=cola.length)idx=0;
+    $('#contador').textContent=`${cola.length} pendientes`;
+    pintar();
+    estado(r.etiquetada===false&&accion!=='saltar'?'guardado (la etiqueta del correo se pondrá luego)':'guardado ✓');
+    cargarContadores();
+  }catch(e){estado('ERROR: '+e.message)}
+}
+async function cargarContadores(){
+  try{const d=await api('/api/cola');$('#nCopiar').textContent=d.aprobadasSinPegar?`(${d.aprobadasSinPegar})`:'';}catch{}
+}
+$('#aprobar').onclick=()=>decidir('aprobar');
+$('#saltar').onclick=async()=>{
+  if(!actual)return;
+  await api('/api/decision',{id:actual.id,accion:'saltar'}).catch(()=>{});
+  cola.push(cola.splice(idx,1)[0]);   // al final de la cola; reaparecerá
+  pintar();
+};
+$('#nofactura').onclick=async()=>{
+  const motivo=prompt('¿Qué es? (albarán, publicidad, extracto…) — se guarda como motivo del descarte');
+  if(motivo===null)return;
+  decidir('descartar',{motivo});
+};
+$('#btnRefrescar').onclick=async()=>{
+  $('#btnRefrescar').disabled=true;estado('mirando el buzón… (puede tardar un par de minutos)');
+  try{const r=await api('/api/refrescar',{});estado(`buzón revisado: ${r.enCola} en cola`);await cargarCola();}
+  catch(e){estado('ERROR al refrescar: '+e.message)}
+  finally{$('#btnRefrescar').disabled=false}
+};
+$('#btnCopiar').onclick=async()=>{
+  const tsv=await api('/api/aprobadas');
+  if(!tsv.trim()){estado('no hay filas aprobadas todavía');return;}
+  // solo las filas (sin cabecera), con importes sin € para que peguen como número
+  const filas=tsv.trim().split('\n').slice(1).map(l=>l.replace(/ ?€/g,''));
+  await navigator.clipboard.writeText(filas.join('\n'));
+  if(confirm(`${filas.length} filas copiadas al portapapeles.\n\nPégalas en la hoja «Facturas» y acepta para marcarlas como pegadas.`)){
+    await api('/api/copiadas',{});cargarContadores();estado('marcadas como pegadas ✓');
+  }
+};
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'&&e.key!=='Enter')return;
+  if(e.key==='Enter'&&!e.shiftKey&&actual){e.preventDefault();decidir('aprobar');}
+  if((e.key==='s'||e.key==='S')&&e.target.tagName!=='INPUT'){$('#saltar').click();}
+});
+cargarCola().catch(e=>estado('ERROR: '+e.message+' — ¿está el servidor en marcha?'));
+</script>
+</body>
+</html>

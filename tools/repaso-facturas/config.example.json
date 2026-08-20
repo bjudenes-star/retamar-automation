@@ -1,0 +1,9 @@
+{
+  "cuentaMail": "Google",
+  "carpetaDatos": "~/RepasoFacturas",
+  "controlXlsx": "~/RepasoFacturas/Control de facturas.xlsx",
+  "etiqueta": "Registrada",
+  "diasVentana": 45,
+  "puerto": 8734,
+  "nodePathXlsx": "~/RepasoFacturas/lib/node_modules"
+}

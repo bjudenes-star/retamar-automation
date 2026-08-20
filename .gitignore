@@ -11,3 +11,6 @@ samples/
 *.pdf
 *.xlsx
 *.docx
+tools/extractor-facturas/salida/
+tools/extractor-facturas/*.tsv
+tools/repaso-facturas/config.json
