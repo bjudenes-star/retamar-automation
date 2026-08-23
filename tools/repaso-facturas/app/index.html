@@ -25,6 +25,7 @@
   #pestanas{display:flex;gap:6px;padding:6px 10px;background:var(--panel);border-bottom:1px solid var(--borde);align-items:center}
   #pestanas button.activa{background:var(--azul-claro);border-color:var(--azul)}
   #visor{flex:1;border:0;width:100%}
+  #visorCorreo{flex:1;overflow-y:auto;background:#fff;padding:18px 24px;white-space:pre-wrap;font-size:13.5px;line-height:1.55}
   #panel{flex:2;display:flex;flex-direction:column;min-width:430px;background:var(--panel)}
   #correo{padding:12px 16px;border-bottom:1px solid var(--borde)}
   #correo .rem{font-weight:600}
@@ -32,13 +33,15 @@
   #avisos{padding:0 16px}
   .aviso{background:var(--ambar-f);color:var(--ambar);border:1px solid #e7d49a;border-radius:6px;padding:6px 10px;margin:8px 0;font-size:13px}
   .aviso.rojo{background:#fdeeee;color:var(--rojo);border-color:#e6bcbc}
+  .aviso.verde{background:#eef7ef;color:var(--ok);border-color:#bfe0c6}
+  .aviso.azul{background:#e8ebf6;color:var(--azul);border-color:#b9c2e2}
   #formulario{flex:1;overflow-y:auto;padding:10px 16px 4px}
   .campo{display:grid;grid-template-columns:130px 1fr;align-items:center;gap:8px;margin:4px 0}
   .campo label{color:var(--gris);font-size:12.5px;text-align:right}
-  .campo input{font:inherit;padding:5px 8px;border:1px solid var(--borde);border-radius:5px;width:100%}
-  .campo input:focus{outline:2px solid var(--azul-claro);border-color:var(--azul)}
-  .campo input.tocado{background:#f2f7f2;border-color:var(--ok)}
-  .campo input.vacio-esperado{background:#fafafa}
+  .campo input,.campo select{font:inherit;padding:5px 8px;border:1px solid var(--borde);border-radius:5px;width:100%;background:#fff}
+  .campo input:focus,.campo select:focus{outline:2px solid var(--azul-claro);border-color:var(--azul)}
+  .campo input.tocado,.campo select.tocado{background:#f2f7f2;border-color:var(--ok)}
+  .campo input.vacio-esperado,.campo select.vacio-esperado{background:#fafafa}
   footer{display:flex;gap:10px;padding:12px 16px;border-top:1px solid var(--borde);background:var(--panel)}
   #aprobar{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600;flex:1}
   #nofactura{color:var(--rojo)}
@@ -60,6 +63,7 @@
   <section id="pdfzona">
     <div id="pestanas"></div>
     <iframe id="visor" title="factura"></iframe>
+    <div id="visorCorreo" hidden></div>
   </section>
   <section id="panel">
     <div id="correo"></div>
@@ -76,7 +80,7 @@
 <script>
 const CAMPOS=['Mes','Fecha','Factura','Número fact.','Importe','Vencim.','Código','Empresa','Verificado','Área','Encargado','Concepto','Contabilidad','Forma de pago','Pagado','IVA','Cuenta de gasto'];
 const VACIOS_OK=['Verificado','Concepto','Pagado'];   // van en blanco a propósito
-let cola=[],idx=0,actual=null;
+let cola=[],idx=0,actual=null,OPCIONES={selects:{},listas:{}};
 
 const $=s=>document.querySelector(s);
 async function api(ruta,body){
@@ -104,9 +108,17 @@ function pintar(){
     return;
   }
   for(const b of ['aprobar','saltar','nofactura'])$('#'+b).disabled=false;
-  correo.innerHTML=`<div class="rem">${esc(actual.remitente)}</div><div class="asu">${esc(actual.asunto)} · ${actual.fechaCorreo}</div>`;
+  const esDeNacho=actual&&actual.tanda==='registrada_nacho';
+  $('#aprobar').textContent=esDeNacho?'Cerrar correo (ya registrada)':'Aprobar (⌘⏎)';
+  $('#aprobar').dataset.modo=esDeNacho?'cerrar':'aprobar';
+  correo.innerHTML=`<div class="rem">${esc(actual.remitente)}</div><div class="asu">${esc(actual.asunto)} · ${esc(actual.fechaCorreo)}</div>`;
   // avisos
   avisos.innerHTML='';
+  if(actual.fueraDeVentana)avisos.innerHTML+='<div class="aviso rojo">⏰ Este correo ha salido de la ventana de búsqueda sin decidirse — decídelo ya; si no se abre desde aquí, búscalo en Gmail.</div>';
+  if((actual.hermanos||1)>1)avisos.innerHTML+=`<div class="aviso">📎 Factura ${actual.nHermano} de ${actual.hermanos} de este correo — cada una se decide por separado; la etiqueta se pone al terminar las ${actual.hermanos}.</div>`;
+  if(actual.tanda==='registrada_nacho')avisos.innerHTML+='<div class="aviso azul">🔒 Nacho YA registró esta factura en el Control — no la apruebes: usa «Cerrar correo».</div>';
+  if(actual.tanda==='para_pegar')avisos.innerHTML+='<div class="aviso verde">📋 Ya está en el Excel, hoja «Para pegar» — apruébala solo para cerrar el correo; NO la copies otra vez desde aquí.</div>';
+  if(actual.tanda==='dudas')avisos.innerHTML+='<div class="aviso">🟡 Está en la hoja «Dudas» del Excel: complétala aquí (o allí) — falta un dato que solo sabes tú.</div>';
   if(actual.confianza==='no_factura')avisos.innerHTML+=aviso('No parece una factura (ficha, albarán, lista…). Decide tú.', true);
   if(actual.confianza==='sin_texto')avisos.innerHTML+=aviso('PDF escaneado sin texto: rellena mirando el documento.');
   if(actual.confianza==='sin_pdf')avisos.innerHTML+=aviso('El adjunto no se pudo descargar — usa «Abrir en Mail» y rellena a mano.', true);
@@ -120,53 +132,105 @@ function pintar(){
     if(i===0)b.classList.add('activa');
     pest.appendChild(b);
   });
+  const tabCorreo=document.createElement('button');
+  tabCorreo.textContent='✉ Correo';
+  tabCorreo.onclick=async()=>{
+    [...pest.children].forEach(x=>x.classList.remove('activa'));tabCorreo.classList.add('activa');
+    $('#visor').hidden=true;const vc=$('#visorCorreo');vc.hidden=false;
+    vc.textContent='cargando el correo…';
+    try{const r=await api('/api/cuerpo',{id:actual.id});vc.textContent=(r.texto||'').trim()||'(el correo no tiene texto)';}
+    catch(e){vc.textContent='No se pudo leer el correo: '+e.message;}
+  };
+  pest.appendChild(tabCorreo);
   const abrir=document.createElement('button');
   abrir.textContent=actual.adjuntos&&actual.adjuntos.length?'Vista Previa':'Abrir en Mail';
   abrir.onclick=()=>api('/api/abrir',{id:actual.id,archivo:actual.adjuntos&&actual.adjuntos[0]});
   pest.appendChild(abrir);
   if(actual.adjuntos&&actual.adjuntos.length)verPdf(actual.adjuntos[0]);
-  else $('#visor').removeAttribute('src');
-  // formulario
+  else{$('#visor').removeAttribute('src');tabCorreo.click();}
+  // formulario: <select> para campos cerrados, <input>+<datalist> para abiertos
   form.innerHTML='';
   const prop=actual.propuesta||{};
   for(const c of CAMPOS){
     const div=document.createElement('div');div.className='campo';
-    const inp=document.createElement('input');
-    inp.value=prop[c]??'';inp.dataset.campo=c;
+    div.innerHTML=`<label>${c}</label>`;
+    const valor=prop[c]??'';
+    let inp;
+    if(OPCIONES.selects[c]){
+      inp=document.createElement('select');
+      const ops=[...OPCIONES.selects[c]];
+      if(valor&&!ops.includes(valor))ops.unshift(valor);   // la propuesta nunca se pierde
+      for(const o of ops){const op=document.createElement('option');op.value=o;op.textContent=o===''?'—':o;inp.appendChild(op);}
+      inp.value=valor;
+      inp.addEventListener('change',()=>inp.classList.toggle('tocado',inp.value!==valor));
+    }else{
+      inp=document.createElement('input');
+      inp.value=valor;
+      if(OPCIONES.listas[c]){
+        inp.setAttribute('list','dl-'+c.replace(/\W/g,''));
+        let dl=document.getElementById('dl-'+c.replace(/\W/g,''));
+        if(!dl){dl=document.createElement('datalist');dl.id='dl-'+c.replace(/\W/g,'');
+          for(const o of OPCIONES.listas[c]){const op=document.createElement('option');op.value=o;dl.appendChild(op);}
+          document.body.appendChild(dl);}
+      }
+      inp.addEventListener('input',()=>inp.classList.toggle('tocado',inp.value!==valor));
+    }
+    inp.dataset.campo=c;
     if(VACIOS_OK.includes(c))inp.classList.add('vacio-esperado');
-    inp.addEventListener('input',()=>inp.classList.toggle('tocado',inp.value!==(prop[c]??'')));
-    div.innerHTML=`<label>${c}</label>`;div.appendChild(inp);
+    div.appendChild(inp);
     form.appendChild(div);
   }
+  // Concepto: sugerencias del MISMO proveedor (las más recientes primero)
+  const conceptoInp=form.querySelector('input[data-campo="Concepto"]');
+  const empresaInp=form.querySelector('[data-campo="Empresa"]');
+  const cargarConceptos=()=>{
+    let dl=document.getElementById('dl-Concepto');
+    if(!dl){dl=document.createElement('datalist');dl.id='dl-Concepto';document.body.appendChild(dl);}
+    dl.innerHTML='';
+    const emp=(empresaInp&&empresaInp.value.trim())||'';
+    for(const o of (OPCIONES.conceptosPorEmpresa||{})[emp]||[]){
+      const op=document.createElement('option');op.value=o;dl.appendChild(op);
+    }
+  };
+  if(conceptoInp){conceptoInp.setAttribute('list','dl-Concepto');cargarConceptos();
+    if(empresaInp)empresaInp.addEventListener('input',cargarConceptos);}
   estado(`Correo ${idx+1} de ${cola.length} · confianza: ${actual.confianza}`);
 }
-const verPdf=a=>$('#visor').src='/pdf/'+encodeURIComponent(a);
+const verPdf=a=>{$('#visorCorreo').hidden=true;const v=$('#visor');v.hidden=false;v.src='/pdf/'+encodeURIComponent(a);};
 const aviso=(t,rojo)=>`<div class="aviso${rojo?' rojo':''}">${esc(t)}</div>`;
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 function filaDelFormulario(){
   const fila={};
-  document.querySelectorAll('#formulario input').forEach(i=>fila[i.dataset.campo]=i.value.trim());
+  document.querySelectorAll('#formulario input, #formulario select').forEach(i=>fila[i.dataset.campo]=i.value.trim());
   return fila;
 }
+let enviando=false;
 async function decidir(accion,extra){
-  if(!actual)return;
-  const body={id:actual.id,accion,...extra};
+  if(!actual||enviando)return;
+  enviando=true;
+  for(const b of ['aprobar','saltar','nofactura'])$('#'+b).disabled=true;
+  const item=actual;                       // capturado: el splice va por identidad
+  const body={id:item.id,accion,...extra};
   if(accion==='aprobar')body.fila=filaDelFormulario();
   try{
     estado('guardando…');
     const r=await api('/api/decision',body);
-    cola.splice(idx,1);if(idx>=cola.length)idx=0;
+    const i=cola.indexOf(item);
+    if(i!==-1)cola.splice(i,1);
+    if(idx>=cola.length)idx=0;
     $('#contador').textContent=`${cola.length} pendientes`;
     pintar();
-    estado(r.etiquetada===false&&accion!=='saltar'?'guardado (la etiqueta del correo se pondrá luego)':'guardado ✓');
+    estado(r.hermanosPendientes?'guardado ✓ — quedan facturas de este mismo correo en la cola'
+      :r.etiquetada===false&&accion!=='saltar'?'guardado (la etiqueta del correo se pondrá luego)':'guardado ✓');
     cargarContadores();
-  }catch(e){estado('ERROR: '+e.message)}
+  }catch(e){estado('ERROR: '+e.message);pintar();}
+  finally{enviando=false;}
 }
 async function cargarContadores(){
   try{const d=await api('/api/cola');$('#nCopiar').textContent=d.aprobadasSinPegar?`(${d.aprobadasSinPegar})`:'';}catch{}
 }
-$('#aprobar').onclick=()=>decidir('aprobar');
+$('#aprobar').onclick=()=>decidir($('#aprobar').dataset.modo==='cerrar'?'cerrar':'aprobar');
 $('#saltar').onclick=async()=>{
   if(!actual)return;
   await api('/api/decision',{id:actual.id,accion:'saltar'}).catch(()=>{});
@@ -185,21 +249,27 @@ $('#btnRefrescar').onclick=async()=>{
   finally{$('#btnRefrescar').disabled=false}
 };
 $('#btnCopiar').onclick=async()=>{
-  const tsv=await api('/api/aprobadas');
-  if(!tsv.trim()){estado('no hay filas aprobadas todavía');return;}
-  // solo las filas (sin cabecera), con importes sin € para que peguen como número
-  const filas=tsv.trim().split('\n').slice(1).map(l=>l.replace(/ ?€/g,''));
+  const r=await api('/api/aprobadas');
+  if(!r.filas||!r.filas.length){estado('no hay filas pendientes de pegar');return;}
+  const filas=r.filas.map(f=>{
+    const c=f.tsv.split('\t');
+    c[4]=String(c[4]||'').replace(/ ?€/g,'');   // el € solo sobra en el Importe
+    return c.join('\t');
+  });
   await navigator.clipboard.writeText(filas.join('\n'));
   if(confirm(`${filas.length} filas copiadas al portapapeles.\n\nPégalas en la hoja «Facturas» y acepta para marcarlas como pegadas.`)){
-    await api('/api/copiadas',{});cargarContadores();estado('marcadas como pegadas ✓');
+    await api('/api/copiadas',{ids:r.filas.map(f=>f.id)});cargarContadores();estado('marcadas como pegadas ✓');
   }
 };
 document.addEventListener('keydown',e=>{
-  if(e.target.tagName==='INPUT'&&e.key!=='Enter')return;
-  if(e.key==='Enter'&&!e.shiftKey&&actual){e.preventDefault();decidir('aprobar');}
-  if((e.key==='s'||e.key==='S')&&e.target.tagName!=='INPUT'){$('#saltar').click();}
+  const enCampo=['INPUT','SELECT','TEXTAREA'].includes(e.target.tagName);
+  // Cmd+Enter aprueba desde cualquier sitio; Enter a secas solo fuera de los campos
+  // (dentro de un campo, Enter confirma el autocompletado sin aprobar sin querer)
+  if(e.key==='Enter'&&(e.metaKey||!enCampo)&&actual){e.preventDefault();$('#aprobar').click();}
+  if((e.key==='s'||e.key==='S')&&!enCampo){$('#saltar').click();}
 });
-cargarCola().catch(e=>estado('ERROR: '+e.message+' — ¿está el servidor en marcha?'));
+api('/api/opciones').then(o=>{OPCIONES=o;return cargarCola();})
+  .catch(e=>estado('ERROR: '+e.message+' — ¿está el servidor en marcha?'));
 </script>
 </body>
 </html>
